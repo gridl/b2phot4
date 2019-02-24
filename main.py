@@ -44,7 +44,7 @@ def train(config_file):
     experiment = instantiate(experiment_module, experiment_name)
 
     # Initialize experiment
-    pdb.set_trace()
+
     experiment = experiment(model, loss, optimizer, configuration)
 
     # Instantiate metrics
@@ -67,7 +67,7 @@ def train(config_file):
     train_dataset = train_dataset('valid', 120)
     train_dataloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=shuffle,
                                   num_workers=num_workers, pin_memory=pin_memory)
-    pdb.set_trace()
+
     test_dataloader = None
     if configuration.has_section('test dataloader'):
         # Get test dataloader parameters

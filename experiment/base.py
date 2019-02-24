@@ -139,7 +139,7 @@ class Experiment(object):
                 # move to GPU if available
                 train_batch, labels_batch = train_batch.to(self.device), labels_batch.to(self.device)
                 # convert to torch Variables
-                train_batch, labels_batch = Variable(train_batch), Variable(labels_batch)
+                # train_batch, labels_batch = Variable(train_batch), Variable(labels_batch)
 
                 # compute model output and loss
                 output_batch = self.model(train_batch)
