@@ -5,16 +5,14 @@ from torchvision.transforms import ToTensor
 from torchvision.datasets import MNIST
 from torch.utils.data import DataLoader
 from utils import Configuration
+from processing.loader import HoromaDataset
+
 
 
 def train(config_file):
-    dataset = MNIST(root='data', train=True, download=True, transform=ToTensor())
-    train = DataLoader(dataset, batch_size=32, shuffle=True, num_workers=8, pin_memory=False)
-    dataset = MNIST(root='data', train=False, download=True, transform=ToTensor())
-    test = DataLoader(dataset, batch_size=32, shuffle=True, num_workers=8, pin_memory=False)
-
+    dataset = HoromaDataset('valid', 1331, use_overlap=True)
     configuration = Configuration(config_file)
-
+    test = 1
     # Instantiate model
     model_module, model_name = configuration.get('model', 'module'), configuration.get('model', 'name')
     model = instantiate(model_module, model_name)
