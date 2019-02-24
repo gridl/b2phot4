@@ -8,9 +8,9 @@ from utils import Configuration
 from processing.loader import HoromaDataset
 
 
-
 def train(config_file):
-    dataset = HoromaDataset('valid', 1331, use_overlap=True)
+    dataset = HoromaDataset('valid', 120, use_overlap=False)
+    train = DataLoader(dataset, shuffle=True, batch_size=16)
     configuration = Configuration(config_file)
     test = 1
     # Instantiate model

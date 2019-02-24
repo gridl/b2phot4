@@ -20,7 +20,8 @@ class HoromaDataset(Dataset):
         pdb.set_trace()
         self.data = np.memmap(self.path_to_split, dtype='float32', mode='r', shape=(split_size, 32, 32, 3))
 
-        self.labels = np.loadtxt(self.path_to_labels, dtype='int64')
+        self.str_labels = np.genfromtxt(self.path_to_labels, dtype='str')
+        self.lookup, self.id_labels = np.unique(self.str_labels, return_inverse=True)
 
     def __len__(self):
         return len(self.data)
@@ -28,7 +29,7 @@ class HoromaDataset(Dataset):
     def __getitem__(self, item):
 
         sample = self.data[item, :, :, :]
-        label = self.labels[item]
+        label = self.id_labels[item]
 
         return sample, label
 
