@@ -5,7 +5,7 @@ import torch.nn as nn
 class CAE(nn.Module):
 
     def __init__(self):
-
+        super(CAE, self).__init__()
         # encoder
         self.relu = nn.ReLU()
         self.pool = nn.MaxPool2d(3)

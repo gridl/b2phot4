@@ -17,8 +17,8 @@ class Experiment(object):
     def __init__(self, model, loss, optimizer, configuration, restore_file=None, only_weights=False):
         self.configuration = configuration
         self.experiment_path = configuration.get_path()
-        self.model = model(**configuration.get_section('model parameters'))
-        self.loss = loss(**configuration.get_section('loss parameters'))
+        self.model = model()
+        self.loss = loss()
         self.optimizer = optimizer(self.model.parameters(), **configuration.get_section('optimizer parameters'))
         self.device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
         self.parameters = configuration.get_section('setup')

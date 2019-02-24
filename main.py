@@ -1,18 +1,31 @@
 import os
 import argparse
 import importlib
-from torchvision.transforms import ToTensor
-from torchvision.datasets import MNIST
+
+import torch
 from torch.utils.data import DataLoader
+
 from utils import Configuration
-from processing.loader import HoromaDataset
+import pdb
+
+
+def instantiate(module, name):
+    module = importlib.import_module(module)
+    instance = getattr(module, name)
+    return instance
+
+
+def instantiate_metrics(metrics, experiment, split):
+    module = importlib.import_module('metrics')
+    for key, metric in metrics.items():
+        metric = getattr(module, metric)
+        metrics.update({key: metric(getattr(experiment, '{}_writer'.format(split)))})
+    return metrics
 
 
 def train(config_file):
-    dataset = HoromaDataset('valid', 120, use_overlap=False)
-    train = DataLoader(dataset, shuffle=True, batch_size=16)
     configuration = Configuration(config_file)
-    test = 1
+
     # Instantiate model
     model_module, model_name = configuration.get('model', 'module'), configuration.get('model', 'name')
     model = instantiate(model_module, model_name)
@@ -31,26 +44,49 @@ def train(config_file):
     experiment = instantiate(experiment_module, experiment_name)
 
     # Initialize experiment
+    pdb.set_trace()
     experiment = experiment(model, loss, optimizer, configuration)
 
+    # Instantiate metrics
     train_metrics = instantiate_metrics(configuration.get_section('train metrics'), experiment, 'train')
-    val_metrics = instantiate_metrics(configuration.get_section('val metrics'), experiment, 'val')
+    val_metrics = None
+    if configuration.has_section('val metrics'):
+        val_metrics = instantiate_metrics(configuration.get_section('val metrics'), experiment, 'val')
 
-    experiment.train_and_validate(train, test, {'train': train_metrics, 'val': val_metrics})
+    # Get train dataloader parameters
+    transform = None
+    batch_size = int(configuration.get('train loader', 'batch size'))
+    shuffle = bool(configuration.get('train loader', 'shuffle'))
+    num_workers = int(configuration.get('train loader', 'num workers'))
+    pin_memory = torch.cuda.is_available()
 
+    # Initialize train dataloader
+    train_dataloader_module = configuration.get('train loader', 'module')
+    train_dataloader_name = configuration.get('train loader', 'name')
+    train_dataset = instantiate(train_dataloader_module, train_dataloader_name)
+    train_dataset = train_dataset('valid', 120)
+    train_dataloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=shuffle,
+                                  num_workers=num_workers, pin_memory=pin_memory)
+    pdb.set_trace()
+    test_dataloader = None
+    if configuration.has_section('test dataloader'):
+        # Get test dataloader parameters
+        file_path = configuration.get('test loader', 'file path')
+        transform = None
+        batch_size = int(configuration.get('test loader', 'batch size'))
+        shuffle = bool(configuration.get('test loader', 'shuffle'))
+        num_workers = int(configuration.get('test loader', 'num_workers'))
+        pin_memory = torch.cuda.is_available()
 
-def instantiate(module, name):
-    module = importlib.import_module(module)
-    instance = getattr(module, name)
-    return instance
+        # Initialize train dataloader
+        test_dataloader_module = configuration.get('test loader', 'module')
+        test_dataloader_name = configuration.get('test loader', 'name')
+        test_dataset = instantiate(test_dataloader_module, test_dataloader_name)
+        test_dataset = test_dataset(file_path, transform=transform)
+        test_dataloader = DataLoader(test_dataset, batch_size=batch_size, shuffle=shuffle,
+                                     num_workers=num_workers, pin_memory=pin_memory)
 
-
-def instantiate_metrics(metrics, experiment, split):
-    module = importlib.import_module('metrics')
-    for key, metric in metrics.items():
-        metric = getattr(module, metric)
-        metrics.update({key: metric(getattr(experiment, '{}_writer'.format(split)))})
-    return metrics
+    experiment.train_and_validate(train_dataloader, test_dataloader, {'train': train_metrics, 'val': val_metrics})
 
 
 if __name__ == '__main__':
