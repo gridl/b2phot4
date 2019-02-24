@@ -24,7 +24,9 @@ class HoromaDataset(Dataset):
         return len(self.data)
 
     def __getitem__(self, item):
-        
+
         sample = self.data[item, :, :, :]
         label = self.labels[item]
+
+        return sample, label
 
