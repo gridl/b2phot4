@@ -50,7 +50,11 @@ class HoromaDataset(Dataset):
             self.map_labels = np.unique(pre_targets)
             self.targets = np.asarray([np.where(self.map_labels == t)[0][0] for t in pre_targets])
 
-        self.data = np.memmap(filename_x, dtype=datatype, mode="r", shape=(self.nb_exemples, height, width, nb_channels))
+        self.data = np.memmap(filename_x,
+                              dtype=datatype,
+                              mode="r",
+                              shape=(self.nb_exemples, height, width, nb_channels))
+
         if subset is None:
             self.data = self.data[skip: None]
         else:
@@ -63,9 +67,10 @@ class HoromaDataset(Dataset):
         return len(self.data)
 
     def __getitem__(self, index):
+        # permute to get in pytorch format
         if self.targets is not None:
-            return torch.Tensor(self.data[index]), torch.Tensor([self.targets[index]])
-        return torch.Tensor(self.data[index])
+            return torch.Tensor(self.data[index]).permute([-1, 0, 1]), torch.Tensor([self.targets[index]])
+        return torch.Tensor(self.data[index]).permute([-1, 0, 1])
 
 
 if __name__ == "__main__":
