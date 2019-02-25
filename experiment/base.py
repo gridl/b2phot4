@@ -183,8 +183,6 @@ class Experiment(object):
 
             # move to GPU if available
             data_batch, labels_batch = data_batch.to(self.device), labels_batch.to(self.device)
-            # convert to torch Variables
-            data_batch, labels_batch = Variable(data_batch), Variable(labels_batch)
 
             # compute model output
             output_batch = self.model(data_batch)
