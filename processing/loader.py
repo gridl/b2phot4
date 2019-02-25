@@ -70,7 +70,9 @@ class HoromaDataset(Dataset):
         # permute to get in pytorch format
         if self.targets is not None:
             return torch.Tensor(self.data[index]).permute([-1, 0, 1]), torch.Tensor([self.targets[index]])
-        return torch.Tensor(self.data[index]).permute([-1, 0, 1])
+        else:
+            return torch.Tensor(self.data[index]).permute([-1, 0, 1]),\
+                   torch.Tensor(self.data[index]).permute([-1, 0, 1]),
 
 
 if __name__ == "__main__":

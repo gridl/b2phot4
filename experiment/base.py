@@ -137,9 +137,8 @@ class Experiment(object):
         with tqdm(total=len(dataloader)) as t:
             for i, (train_batch, labels_batch) in enumerate(dataloader):
                 # move to GPU if available
+                self.model = self.model.to(self.device)
                 train_batch, labels_batch = train_batch.to(self.device), labels_batch.to(self.device)
-                # convert to torch Variables
-                # train_batch, labels_batch = Variable(train_batch), Variable(labels_batch)
 
                 # compute model output and loss
                 output_batch = self.model(train_batch)
