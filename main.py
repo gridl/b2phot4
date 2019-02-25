@@ -63,8 +63,11 @@ def train(config_file):
     # Initialize train dataloader
     train_dataloader_module = configuration.get('train loader', 'module')
     train_dataloader_name = configuration.get('train loader', 'name')
+    skip = int(configuration.get('train loader', 'skip'))
+    split = configuration.get('train loader', 'split')
     train_dataset = instantiate(train_dataloader_module, train_dataloader_name)
-    train_dataset = train_dataset('valid', 120)
+
+    train_dataset = train_dataset(split=split, skip=skip, flattened=False)
     train_dataloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=shuffle,
                                   num_workers=num_workers, pin_memory=pin_memory)
 
