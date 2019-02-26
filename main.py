@@ -4,7 +4,7 @@ import importlib
 
 import torch
 from torch.utils.data import DataLoader
-
+from torchvision import transforms
 from utils import Configuration
 import pdb
 
@@ -54,7 +54,7 @@ def train(config_file):
         val_metrics = instantiate_metrics(configuration.get_section('val metrics'), experiment, 'val')
 
     # Get train dataloader parameters
-    transform = None
+    transform = transforms.Compose([transforms.ToTensor()])
     batch_size = int(configuration.get('train loader', 'batch size'))
     shuffle = bool(configuration.get('train loader', 'shuffle'))
     num_workers = int(configuration.get('train loader', 'num workers'))
@@ -67,7 +67,7 @@ def train(config_file):
     split = configuration.get('train loader', 'split')
     dataset = instantiate(train_dataloader_module, train_dataloader_name)
 
-    dataset = dataset(split=split, skip=skip, flattened=False)
+    dataset = dataset(split=split, skip=skip, flattened=False, transform=transform)
     train_dataset, val_dataset = torch.utils.data.random_split(dataset, [int(0.7*len(dataset)), int(0.3*len(dataset))])
 
     train_dataloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=shuffle,

@@ -25,6 +25,7 @@ class CAE(nn.Module):
         self.up_conv4 = nn.ConvTranspose2d(128, 64, 4, stride=2)
         self.up_bn4 = nn.BatchNorm2d(64)
         self.mix_conv = nn.Conv2d(64, 3, 3, stride=1, padding=1)
+        self.sigmoid = nn.Sigmoid()
 
     def encoder(self, x):
         x = self.down_conv1(x)
@@ -62,6 +63,7 @@ class CAE(nn.Module):
         x = self.up_bn4(x)
         x = self.relu(x)
         x = self.mix_conv(x)
+        x = self.sigmoid(x)
 
         return x
 
