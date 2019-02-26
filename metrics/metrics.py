@@ -109,3 +109,17 @@ class Accuracy(Metric):
 
     def write_to_tensorboard(self, epoch):
         self.writer.add_scalar(self.__class__.__name__, self.get_accuracy(), epoch)
+
+
+class Visualize(Metric):
+    def __init__(self, writer):
+        super(Visualize, self).__init__(writer)
+
+    def __call__(self, network_images, labels):
+        self.images = network_images
+        self.labels = labels
+
+    def write_to_tensorboard(self, epoch):
+        self.writer.add_image(self.__class__.__name__ + '/output', self.images, epoch)
+        self.writer.add_image(self.__class__.__name__ + '/labels', self.labels, epoch)
+

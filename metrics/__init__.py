@@ -1,1 +1,1 @@
-from metrics.metrics import LossAverage
+from metrics.metrics import LossAverage, Visualize

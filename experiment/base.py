@@ -7,9 +7,9 @@ from tqdm import tqdm
 from utils.misc import set_logger
 
 import torch
-from torch.autograd import Variable
+from torchvision.utils import make_grid
 from tensorboardX import SummaryWriter
-
+import pdb
 
 class Experiment(object):
     """Base class for experiments"""
@@ -110,22 +110,6 @@ class Experiment(object):
             # val_acc = val_metrics['accuracy'].get_accuracy()
             # is_best = val_acc >= best_val_acc
 
-            # # Save model
-            # self.save_checkpoint(epoch + 1, is_best=is_best)
-
-            # # If best_eval, best_save_path
-            # if is_best:
-            #     logging.info("- Found new best model")
-            #     best_val_acc = val_acc
-            #
-            #     # Save best val metrics in a json file in the model directory
-            #     best_json_path = os.path.join(model_dir, "metrics_val_best_weights.json")
-            #     f.save_dict_to_json(val_metrics, best_json_path)
-            #
-            # # Save latest val metrics in a json file in the model directory
-            # last_json_path = os.path.join(model_dir, "metrics_val_last_weights.json")
-            # f.save_dict_to_json(val_metrics, last_json_path)
-
     def train_epoch(self, dataloader, metrics):
         # set model to training mode
         self.model.train()
@@ -147,7 +131,6 @@ class Experiment(object):
                 # clear previous gradients, compute gradients of all variables wrt loss
                 self.optimizer.zero_grad()
                 loss.backward()
-
                 # update the average loss
                 metrics['loss'].update(loss.item())
 
@@ -189,14 +172,16 @@ class Experiment(object):
             loss = self.compute_loss(output_batch, data_batch)
 
             # extract data from torch Variable, move to cpu, convert to numpy arrays
-            output_batch = output_batch.data.cpu().numpy()
-            labels_batch = labels_batch.data.cpu().numpy()
+            # output_batch = output_batch.data.cpu().numpy()
+            # labels_batch = labels_batch.data.cpu().numpy()
 
             # update the average loss
             metrics['loss'].update(loss.item())
 
             # compute all metrics on this batch
             self.compute_metrics(metrics, output_batch, labels_batch)
+
+        metrics['visualize'](make_grid(output_batch[0:16]), make_grid(labels_batch[0:16]))
 
         # Summary of metrics in log
         metrics_string = "".join([str(metric) for metric in metrics.values()])
