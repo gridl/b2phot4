@@ -9,6 +9,7 @@ from utils.misc import set_logger
 import torch
 from torchvision.utils import make_grid
 from tensorboardX import SummaryWriter
+import torch.nn.functional as F
 import pdb
 
 class Experiment(object):
@@ -181,7 +182,7 @@ class Experiment(object):
             # compute all metrics on this batch
             self.compute_metrics(metrics, output_batch, labels_batch)
 
-        metrics['visualize'](make_grid(output_batch[0:16]), make_grid(labels_batch[0:16]))
+        metrics['visualize'](make_grid(output_batch), make_grid(labels_batch))
 
         # Summary of metrics in log
         metrics_string = "".join([str(metric) for metric in metrics.values()])
