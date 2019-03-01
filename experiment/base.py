@@ -9,6 +9,12 @@ from utils.misc import set_logger
 import torch
 from torchvision.utils import make_grid
 from tensorboardX import SummaryWriter
+
+from sklearn.cluster import KMeans
+from sklearn.metrics import accuracy_score, f1_score
+import warnings  # To mute scikit-learn warnings about f1 score.
+warnings.filterwarnings("ignore")
+
 import pdb
 
 class Experiment(object):
@@ -96,13 +102,13 @@ class Experiment(object):
             logging.info("Epoch {}/{}".format(epoch + 1, self.parameters.get('num_epochs')))
 
             # Compute number of batches in one epoch (one full pass over the training set)
-            train_metrics = self.train_epoch(train_dataloader, metrics.get('train'))
+            train_metrics = self.train_autoencoder(train_dataloader, metrics.get('train'))
 
             # Register train metrics to tensorboard
             self.register_metrics(train_metrics, epoch + 1)
 
             # Evaluate for one epoch on validation set
-            val_metrics = self.validate(val_dataloader, metrics.get('val'))
+            val_metrics = self.eval_autoencoder(val_dataloader, metrics.get('val'))
 
             # Register validation metrics to tensorboard
             self.register_metrics(val_metrics, epoch + 1)
@@ -110,7 +116,8 @@ class Experiment(object):
             # val_acc = val_metrics['accuracy'].get_accuracy()
             # is_best = val_acc >= best_val_acc
 
-    def train_epoch(self, dataloader, metrics):
+
+    def train_autoencoder(self, dataloader, metrics):
         # set model to training mode
         self.model.train()
 
@@ -154,7 +161,7 @@ class Experiment(object):
         logging.info("- Train metrics: \n" + metrics_string)
         return metrics
 
-    def validate(self, dataloader, metrics):
+    def eval_autoencoder(self, dataloader, metrics):
         # set model to evaluation mode
         self.model.eval()
 
@@ -187,3 +194,60 @@ class Experiment(object):
         metrics_string = "".join([str(metric) for metric in metrics.values()])
         logging.info("- Val metrics : \n" + metrics_string)
         return metrics
+
+    def assign_labels_to_clusters(self, kmeans, data, labels_true):
+        """
+        Assign class label to each K-means cluster using labeled data.
+        The class label is based on the class of majority samples within a cluster.
+        Unassigned clusters are labeled as -1.
+        """
+        print("Assigning labels to clusters ...", end=' ')
+        start_time = time()
+
+        labels_pred = kmeans.predict(data)
+        labelled_clusters = []
+        for i in range(kmeans.n_clusters):
+            idx = np.where(labels_pred == i)[0]
+            if len(idx) != 0:
+                labels_freq = np.bincount(labels_true[idx])
+                labelled_clusters.append(np.argmax(labels_freq))
+            else:
+                labelled_clusters.append(-1)
+        print("Done in {:.2f} sec".format(time() - start_time))
+
+        return np.asarray(labelled_clusters)
+
+    def compute_kmeans_metrics(y_true, y_pred):
+        """
+        Compute kmeans metrics.
+        """
+        accuracy = accuracy_score(y_true, y_pred)
+        f1 = f1_score(y_true, y_pred, average="weighted")
+        return accuracy, f1
+
+    def train_kmeans(trainset, n_clusters, seed):
+        """
+        Train K-means model.
+        """
+        print("Training k-means ...", end=' ')
+        start_time = time()
+        kmeans = KMeans(init="k-means++", n_clusters=n_clusters, n_init=5, max_iter=1000, random_state=seed, n_jobs=-1)
+        kmeans.fit(trainset)
+        print("Done in {:.2f} sec |".format(time() - start_time), end=' ')
+        print("Nb iter = {}, model inertia = {:.2f}".format(kmeans.n_iter_, kmeans.inertia_))
+
+        return kmeans
+
+    def eval_kmeans(model, x, y_true):
+        """
+        Predict labels and compare to true labels to compute the accuracy.
+        """
+        print("Evaluating model ...", end=' ')
+        start_time = time()
+        y_pred = model['cluster_label'][model['kmeans'].predict(x)]
+
+        accuracy, f1 = compute_metrics(y_true, y_pred)
+
+        print("Done in {:.2f} sec | Accuracy: {:.2f} - F1: {:.2f}".format(time() - start_time, accuracy * 100, f1 * 100))
+
+        return y_pred
