@@ -119,7 +119,7 @@ class Experiment(object):
             # k means stuff
             kmeans = self.train_kmeans(train_dataloader, k, seed)
             cluster_preds = self.eval_kmeans(kmeans, val_dataloader)
-            y_preds = self.assign_labels_to_clusters(kmeans, cluster_preds, val_dataloader.dataset.targets.numpy())
+            y_preds = self.assign_labels_to_clusters(kmeans, cluster_preds, val_dataloader.dataset.targets)
             pdb.set_trace()
             # val_acc = val_metrics['accuracy'].get_accuracy()
             # is_best = val_acc >= best_val_acc
