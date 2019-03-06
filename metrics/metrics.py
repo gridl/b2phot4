@@ -1,6 +1,7 @@
 import os
 import numpy as np
-
+from sklearn.cluster import MiniBatchKMeans
+from sklearn.metrics import accuracy_score, f1_score
 
 class Metric(object):
     """Base class for metric implementation"""
@@ -112,6 +113,8 @@ class Accuracy(Metric):
 
 
 class Visualize(Metric):
+    """Returns images of data points and embeddings.
+    """
     def __init__(self, writer):
         super(Visualize, self).__init__(writer)
 
@@ -123,3 +126,76 @@ class Visualize(Metric):
         self.writer.add_image(self.__class__.__name__ + '/output', self.images, epoch)
         self.writer.add_image(self.__class__.__name__ + '/labels', self.labels, epoch)
 
+
+class ACC(Metric):
+    """Returns clustering accuracy.
+    """
+    def __init__(self, writer):
+        super(ACC, self).__init__(writer)
+
+    def __call__(self, y_true, y_pred):
+        """
+
+        :param y_true: 1d nparray
+            true labels.
+        :param y_pred: 1d nparray
+            cluster predictions.
+        :return: float
+        """
+        self.y_true = y_true
+        self.y_pred = y_pred
+
+    def get_accuracy_cluster(self):
+        """Returns clustering accuracy.
+        -------
+            outputs : ndarray
+                Model predictions.
+            labels : ndarray
+                Correct outputs.
+            params : object
+        """
+        return accuracy_score(self.y_true, self.y_pred)
+
+    def write_to_tensorboard(self, epoch):
+        self.writer.add_scalar(self.__class__.__name__ + '/Accuracy_of_Cluster', self.get_accuracy_cluster(), epoch)
+
+
+class F1score(Metric):
+    """Returns f1 score of clustering module.
+    """
+    def __init__(self, writer):
+        super(F1score, self).__init__(writer)
+
+    def __call__(self, y_true, y_pred):
+        """
+        :param y_true: 1d nparray
+            true labels.
+        :param y_pred: 1d nparray
+            cluster predictions.
+        :return: float
+        """
+        self.y_true = y_true
+        self.y_pred = y_pred
+
+    def get_f1(self):
+        return f1_score(self.y_true, self.y_pred, average="weighted")
+
+    def write_to_tensorboard(self, epoch):
+        self.writer.add_scalar(self.__class__.__name__ + 'F1_score_of_Cluster', self.get_f1(), epoch)
+
+
+class Inertia(Metric):
+    """Returns the sum of squared distances of samples
+    to their closest cluster center.
+    Returns
+    -------
+    float : float
+    """
+    def __init__(self, writer):
+        super(Inertia, self).__init__(writer)
+
+    def __call__(self, cluster):
+        self.inertia = cluster.inertia_
+
+    def write_to_tensorboard(self, epoch):
+        self.writer.add_scalar(self.__class__.__name__ + 'Inertia_of_Cluster', self.inertia, epoch)

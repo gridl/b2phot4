@@ -36,14 +36,18 @@ class Experiment(object):
             self.load_checkpoint(restore_file, only_weights)
         self.train_writer = SummaryWriter(os.path.join(self.experiment_path, 'tensorboard', 'train'))
         self.val_writer = SummaryWriter(os.path.join(self.experiment_path, 'tensorboard', 'val'))
+        self.cluster_writer = SummaryWriter(os.path.join(self.experiment_path, 'tensorboard', 'cluster'))
 
     def compute_loss(self, output_batch, labels_batch):
         return self.loss(output_batch, labels_batch)
 
     @staticmethod
-    def compute_metrics(metrics, output_batch, labels_batch):
-        for metric in metrics.values():
-            metric(output_batch, labels_batch)
+    def compute_metrics(metrics, param1, param2):
+        for key, metric in metrics.items():
+            if key == 'inertia':
+                pass
+            else:
+                metric(param1, param2)
 
     def load_checkpoint(self, restore_file, only_weights):
         if not os.path.exists(restore_file):
@@ -117,10 +121,13 @@ class Experiment(object):
             self.register_metrics(val_metrics, epoch + 1)
 
             # k means stuff
-            kmeans = self.train_kmeans(train_dataloader, k, seed)
-            cluster_preds = self.eval_kmeans(kmeans, val_dataloader)
+            kmeans = self.train_kmeans(train_dataloader, k, seed, metrics.get('cluster'))
+            cluster_preds, cluster_metrics = self.eval_kmeans(kmeans, val_dataloader, val_dataloader.dataset.targets, metrics.get('cluster'))
+            cluster_metrics['inertia'](kmeans)
             y_preds = self.assign_labels_to_clusters(kmeans, cluster_preds, val_dataloader.dataset.targets)
-            pdb.set_trace()
+
+            #Register cluster metrics to tensorboard
+            self.register_metrics(cluster_metrics, epoch + 1)
             # val_acc = val_metrics['accuracy'].get_accuracy()
             # is_best = val_acc >= best_val_acc
 
@@ -210,7 +217,7 @@ class Experiment(object):
         Unassigned clusters are labeled as -1.
         """
         print("Assigning labels to clusters ...", end=' ')
-        start_time = time()
+        start_time = time.time()
 
         labelled_clusters = []
         for i in range(kmeans.n_clusters):
@@ -220,7 +227,7 @@ class Experiment(object):
                 labelled_clusters.append(np.argmax(labels_freq))
             else:
                 labelled_clusters.append(-1)
-        print("Done in {:.2f} sec".format(time() - start_time))
+        print("Done in {:.2f} sec".format(time.time() - start_time))
 
         return np.asarray(labelled_clusters)
 
@@ -233,13 +240,15 @@ class Experiment(object):
         f1 = f1_score(y_true, y_pred, average="weighted")
         return accuracy, f1
 
-    def train_kmeans(self, train_dataloader, n_clusters, seed):
+    def train_kmeans(self, train_dataloader, n_clusters, seed, metrics):
         """
         Train K-means model.
         """
         print("Training k-means ...", end=' ')
+
         kmeans = MiniBatchKMeans(init="k-means++", n_clusters=n_clusters, n_init=5, max_iter=100, random_state=seed)
         start_time = time.time()
+
         for i, (train_batch, label_batch) in enumerate(train_dataloader):
             train_batch = train_batch.to(self.device)
             train_embeddings = self.model.encoder(train_batch)
@@ -249,17 +258,21 @@ class Experiment(object):
             kmeans = kmeans.partial_fit(train_embeddings)
 
         print("Done in {:.2f} sec |".format(time.time() - start_time), end=' ')
-        # print("Nb iter = {}, model inertia = {:.2f}".format(kmeans.n_iter_, kmeans.inertia_))
+        print("model inertia = {:.2f}".format(kmeans.inertia_))
 
         return kmeans
 
-    def eval_kmeans(self, kmeans, val_dataloader):
+    def eval_kmeans(self, kmeans, val_dataloader, y_true, metrics):
         """
         Predict labels and compare to true labels to compute the accuracy.
         """
         print("Evaluating k-means model ...", end=' ')
+
+        self.reset_metrics(metrics)
+
         start_time = time.time()
         y_preds = []
+
         for i, (data_batch, _) in enumerate(val_dataloader):
             data_batch = data_batch.to(self.device)
             val_embeddings = self.model.encoder(data_batch)
@@ -269,7 +282,9 @@ class Experiment(object):
             batch_preds = kmeans.predict(val_embeddings)
             y_preds.append(batch_preds)
 
-        # accuracy, f1 = self.compute_kmeans_metrics(y_true, y_pred)
-        # print("Done in {:.2f} sec | Accuracy: {:.2f} - F1: {:.2f}".format(time() - start_time, accuracy * 100, f1 * 100))
+        self.compute_metrics(metrics, y_true.reshape(-1,1), np.array(y_preds).reshape(-1,1))
 
-        return y_preds
+        accuracy, f1 = self.compute_kmeans_metrics(y_true.reshape(-1,1), np.array(y_preds).reshape(-1,1))
+        print("Done in {:.2f} sec | Accuracy: {:.2f} - F1: {:.2f}".format(time.time() - start_time, accuracy * 100, f1 * 100))
+
+        return y_preds, metrics
