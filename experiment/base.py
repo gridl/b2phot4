@@ -122,9 +122,12 @@ class Experiment(object):
 
             # k means stuff
             kmeans = self.train_kmeans(train_dataloader, k, seed, metrics.get('cluster'))
-            cluster_preds, cluster_metrics = self.eval_kmeans(kmeans, val_dataloader, val_dataloader.dataset.targets, metrics.get('cluster'))
+            cluster_preds = self.eval_kmeans(kmeans, val_dataloader, val_dataloader.dataset.targets)
+            y_preds, cluster_metrics = self.assign_labels_to_clusters(kmeans,
+                                                                      cluster_preds,
+                                                                      val_dataloader.dataset.targets,
+                                                                      metrics.get('cluster'))
             cluster_metrics['inertia'](kmeans)
-            y_preds = self.assign_labels_to_clusters(kmeans, cluster_preds, val_dataloader.dataset.targets)
 
             #Register cluster metrics to tensorboard
             self.register_metrics(cluster_metrics, epoch + 1)
@@ -209,14 +212,16 @@ class Experiment(object):
         logging.info("- Val metrics : \n" + metrics_string)
         return metrics
 
-    @staticmethod
-    def assign_labels_to_clusters(kmeans, y_pred, y_true):
+    def assign_labels_to_clusters(self, kmeans, y_pred, y_true, metrics):
         """
         Assign class label to each K-means cluster using labeled data.
         The class label is based on the class of majority samples within a cluster.
         Unassigned clusters are labeled as -1.
         """
         print("Assigning labels to clusters ...", end=' ')
+
+        self.reset_metrics(metrics)
+
         start_time = time.time()
 
         labelled_clusters = []
@@ -229,7 +234,12 @@ class Experiment(object):
                 labelled_clusters.append(-1)
         print("Done in {:.2f} sec".format(time.time() - start_time))
 
-        return np.asarray(labelled_clusters)
+        pdb.set_trace()
+        self.compute_metrics(metrics, y_true.reshape(-1, 1), np.array(labelled_clusters).reshape(-1, 1))
+        accuracy, f1 = self.compute_kmeans_metrics(y_true.reshape(-1,1), np.array(labelled_clusters).reshape(-1,1))
+        print("Done in {:.2f} sec | Accuracy: {:.2f} - F1: {:.2f}".format(time.time() - start_time, accuracy * 100, f1 * 100))
+
+        return np.asarray(labelled_clusters), metrics
 
     @staticmethod
     def compute_kmeans_metrics(y_true, y_pred):
@@ -262,13 +272,11 @@ class Experiment(object):
 
         return kmeans
 
-    def eval_kmeans(self, kmeans, val_dataloader, y_true, metrics):
+    def eval_kmeans(self, kmeans, val_dataloader, y_true):
         """
         Predict labels and compare to true labels to compute the accuracy.
         """
         print("Evaluating k-means model ...", end=' ')
-
-        self.reset_metrics(metrics)
 
         start_time = time.time()
         y_preds = []
@@ -282,9 +290,6 @@ class Experiment(object):
             batch_preds = kmeans.predict(val_embeddings)
             y_preds.append(batch_preds)
 
-        self.compute_metrics(metrics, y_true.reshape(-1,1), np.array(y_preds).reshape(-1,1))
+        y_preds = np.squeeze(np.stack(y_preds), 0)
 
-        accuracy, f1 = self.compute_kmeans_metrics(y_true.reshape(-1,1), np.array(y_preds).reshape(-1,1))
-        print("Done in {:.2f} sec | Accuracy: {:.2f} - F1: {:.2f}".format(time.time() - start_time, accuracy * 100, f1 * 100))
-
-        return y_preds, metrics
+        return y_preds
