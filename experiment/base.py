@@ -122,7 +122,10 @@ class Experiment(object):
 
             # k means stuff
             kmeans = self.train_kmeans(train_dataloader, k, seed, metrics.get('cluster'))
-            cluster_preds, cluster_metrics = self.eval_kmeans(kmeans, val_dataloader, val_dataloader.dataset.targets, metrics.get('cluster'))
+            cluster_preds, cluster_metrics = self.eval_kmeans(kmeans,
+                                                              val_dataloader,
+                                                              val_dataloader.dataset.targets,
+                                                              metrics.get('cluster'))
             cluster_metrics['inertia'](kmeans)
             y_preds = self.assign_labels_to_clusters(kmeans, cluster_preds, val_dataloader.dataset.targets)
 
