@@ -10,7 +10,7 @@ import torch
 from torchvision.utils import make_grid
 from tensorboardX import SummaryWriter
 
-from sklearn.cluster import MiniBatchKMeans
+from sklearn.cluster import MiniBatchKMeans, KMeans
 from sklearn.metrics import accuracy_score, f1_score
 import warnings  # To mute scikit-learn warnings about f1 score.
 
@@ -206,7 +206,7 @@ class Experiment(object):
             # compute all metrics on this batch
             self.compute_metrics(metrics, output_batch, labels_batch)
 
-        metrics['visualize'](make_grid(data_batch), make_grid(output_batch))
+        metrics['visualize'](make_grid(output_batch), make_grid(data_batch))
 
         # Summary of metrics in log
         metrics_string = "".join([str(metric) for metric in metrics.values()])
@@ -260,16 +260,21 @@ class Experiment(object):
         """
         print("Training k-means ...", end=' ')
 
-        kmeans = MiniBatchKMeans(init="k-means++", n_clusters=n_clusters, n_init=3, max_iter=100, random_state=seed)
+        # kmeans = MiniBatchKMeans(init="k-means++", n_clusters=n_clusters, n_init=3, max_iter=100, random_state=seed)
+        kmeans = KMeans(init="k-means++", n_clusters=n_clusters, n_init=5, max_iter=1000, random_state=seed, n_jobs=-1)
         start_time = time.time()
+        train_embeddings = []
 
         for i, (train_batch, label_batch) in enumerate(train_dataloader):
             train_batch = train_batch.to(self.device)
-            train_embeddings = self.model.encoder(train_batch)
-            train_embeddings = train_embeddings.detach().cpu().numpy()
-            train_embeddings = np.squeeze(train_embeddings, -1)
-            train_embeddings = np.squeeze(train_embeddings, -1)
-            kmeans = kmeans.partial_fit(train_embeddings)
+            train_embeddings_batch = self.model.encoder(train_batch)
+            train_embeddings_batch = train_embeddings_batch.detach().cpu().numpy()
+            train_embeddings_batch = np.squeeze(train_embeddings_batch, -1)
+            train_embeddings_batch = np.squeeze(train_embeddings_batch, -1)
+            train_embeddings.append(train_embeddings_batch)
+
+        train_embeddings = np.vstack(train_embeddings)
+        kmeans = kmeans.fit(train_embeddings)
 
         print("Done in {:.2f} sec |".format(time.time() - start_time), end=' ')
         print("model inertia = {:.2f}".format(kmeans.inertia_))
