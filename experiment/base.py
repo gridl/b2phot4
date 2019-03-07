@@ -13,6 +13,7 @@ from tensorboardX import SummaryWriter
 from sklearn.cluster import MiniBatchKMeans
 from sklearn.metrics import accuracy_score, f1_score
 import warnings  # To mute scikit-learn warnings about f1 score.
+
 warnings.filterwarnings("ignore")
 
 import pdb
@@ -120,16 +121,17 @@ class Experiment(object):
             # Register validation metrics to tensorboard
             self.register_metrics(val_metrics, epoch + 1)
 
-            # k means stuff
-            kmeans = self.train_kmeans(train_dataloader, k, seed, metrics.get('cluster'))
-            cluster_preds, cluster_metrics = self.eval_kmeans(kmeans,
-                                                              val_dataloader,
-                                                              val_dataloader.dataset.targets,
-                                                              metrics.get('cluster'))
-            cluster_metrics['inertia'](kmeans)
-            y_preds = self.assign_labels_to_clusters(kmeans, cluster_preds, val_dataloader.dataset.targets)
+            # k-means stuff
+            kmeans = self.train_kmeans(train_dataloader, k, seed)
+            cluster_preds = self.predict_kmeans(kmeans, val_dataloader)
+            cluster_metrics = self.eval_kmeans(kmeans,
+                                                             cluster_preds,
+                                                             val_dataloader.dataset.targets,
+                                                             metrics.get('cluster'))
 
-            #Register cluster metrics to tensorboard
+            cluster_metrics['inertia'](kmeans)
+
+            #  Register cluster metrics to tensorboard
             self.register_metrics(cluster_metrics, epoch + 1)
             # val_acc = val_metrics['accuracy'].get_accuracy()
             # is_best = val_acc >= best_val_acc
@@ -187,7 +189,6 @@ class Experiment(object):
 
         # compute metrics over the dataset
         for data_batch, labels_batch in dataloader:
-
             # move to GPU if available
             data_batch, labels_batch = data_batch.to(self.device), labels_batch.to(self.device)
 
@@ -212,27 +213,38 @@ class Experiment(object):
         logging.info("- Val metrics : \n" + metrics_string)
         return metrics
 
-    @staticmethod
-    def assign_labels_to_clusters(kmeans, y_pred, y_true):
+    def eval_kmeans(self, kmeans, cluster_pred, y_true, metrics):
         """
         Assign class label to each K-means cluster using labeled data.
         The class label is based on the class of majority samples within a cluster.
         Unassigned clusters are labeled as -1.
+        After assigning computes kmeans accuracy and f1 score.
         """
         print("Assigning labels to clusters ...", end=' ')
+
+        self.reset_metrics(metrics)
+
         start_time = time.time()
 
         labelled_clusters = []
-        for i in range(kmeans.n_clusters):
-            idx = np.where(y_pred == i)[0]
+        pdb.set_trace()
+        for i in range(0, kmeans.n_clusters):
+            idx = np.where(cluster_pred == i)[0]
             if len(idx) != 0:
                 labels_freq = np.bincount(y_true[idx])
                 labelled_clusters.append(np.argmax(labels_freq))
             else:
                 labelled_clusters.append(-1)
-        print("Done in {:.2f} sec".format(time.time() - start_time))
+        pdb.set_trace()
+        labelled_clusters = np.asarray(labelled_clusters)
+        y_preds = labelled_clusters[cluster_pred]
 
-        return np.asarray(labelled_clusters)
+        self.compute_metrics(metrics, y_true.reshape(-1, 1), y_preds.reshape(-1, 1))
+        accuracy, f1 = self.compute_kmeans_metrics(y_true.reshape(-1, 1), y_preds.reshape(-1, 1))
+        print("Done in {:.2f} sec | Accuracy: {:.2f} - F1: {:.2f}".format(time.time() - start_time, accuracy * 100,
+                                                                          f1 * 100))
+
+        return labelled_clusters, metrics
 
     @staticmethod
     def compute_kmeans_metrics(y_true, y_pred):
@@ -243,13 +255,13 @@ class Experiment(object):
         f1 = f1_score(y_true, y_pred, average="weighted")
         return accuracy, f1
 
-    def train_kmeans(self, train_dataloader, n_clusters, seed, metrics):
+    def train_kmeans(self, train_dataloader, n_clusters, seed):
         """
         Train K-means model.
         """
         print("Training k-means ...", end=' ')
 
-        kmeans = MiniBatchKMeans(init="k-means++", n_clusters=n_clusters, n_init=5, max_iter=100, random_state=seed)
+        kmeans = MiniBatchKMeans(init="k-means++", n_clusters=n_clusters, n_init=3, max_iter=100, random_state=seed)
         start_time = time.time()
 
         for i, (train_batch, label_batch) in enumerate(train_dataloader):
@@ -265,15 +277,12 @@ class Experiment(object):
 
         return kmeans
 
-    def eval_kmeans(self, kmeans, val_dataloader, y_true, metrics):
+    def predict_kmeans(self, kmeans, val_dataloader):
         """
-        Predict labels and compare to true labels to compute the accuracy.
+        Predict labels.
         """
         print("Evaluating k-means model ...", end=' ')
 
-        self.reset_metrics(metrics)
-
-        start_time = time.time()
         y_preds = []
 
         for i, (data_batch, _) in enumerate(val_dataloader):
@@ -285,9 +294,6 @@ class Experiment(object):
             batch_preds = kmeans.predict(val_embeddings)
             y_preds.append(batch_preds)
 
-        self.compute_metrics(metrics, y_true.reshape(-1,1), np.array(y_preds).reshape(-1,1))
+        y_preds = np.squeeze(np.stack(y_preds), 0)
 
-        accuracy, f1 = self.compute_kmeans_metrics(y_true.reshape(-1,1), np.array(y_preds).reshape(-1,1))
-        print("Done in {:.2f} sec | Accuracy: {:.2f} - F1: {:.2f}".format(time.time() - start_time, accuracy * 100, f1 * 100))
-
-        return y_preds, metrics
+        return y_preds
