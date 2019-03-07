@@ -124,10 +124,10 @@ class Experiment(object):
             # k-means stuff
             kmeans = self.train_kmeans(train_dataloader, k, seed)
             cluster_preds = self.predict_kmeans(kmeans, val_dataloader)
-            cluster_metrics = self.eval_kmeans(kmeans,
-                                                             cluster_preds,
-                                                             val_dataloader.dataset.targets,
-                                                             metrics.get('cluster'))
+            _, cluster_metrics = self.eval_kmeans(kmeans,
+                                                  cluster_preds,
+                                                  val_dataloader.dataset.targets,
+                                                  metrics.get('cluster'))
 
             cluster_metrics['inertia'](kmeans)
 
@@ -227,7 +227,7 @@ class Experiment(object):
         start_time = time.time()
 
         labelled_clusters = []
-        pdb.set_trace()
+
         for i in range(0, kmeans.n_clusters):
             idx = np.where(cluster_pred == i)[0]
             if len(idx) != 0:
@@ -235,7 +235,6 @@ class Experiment(object):
                 labelled_clusters.append(np.argmax(labels_freq))
             else:
                 labelled_clusters.append(-1)
-        pdb.set_trace()
         labelled_clusters = np.asarray(labelled_clusters)
         y_preds = labelled_clusters[cluster_pred]
 
