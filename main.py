@@ -84,8 +84,8 @@ def train(config_file):
     train_dataset = train_dataset(split=train_split, skip=train_skip, flattened=False, transform=transform)
     valid_dataset = valid_dataset(split=val_split, skip=val_skip, flattened=False, transform=transform)
 
-    #train_dataset, valid_dataset = torch.utils.data.random_split(dataset,
-                                                               #[int(0.7 * len(dataset)), int(0.3 * len(dataset))])
+    # train_dataset, valid_dataset = torch.utils.data.random_split(dataset,
+    #                               [int(0.7 * len(dataset)), int(0.3 * len(dataset))])
     train_dataloader = DataLoader(train_dataset, batch_size=train_batch_size, shuffle=train_shuffle,
                                   num_workers=train_num_workers, pin_memory=pin_memory)
     val_dataloader = DataLoader(valid_dataset, batch_size=val_batch_size, shuffle=False,
@@ -108,7 +108,7 @@ def train(config_file):
         test_dataloader = DataLoader(test_dataset, batch_size=batch_size, shuffle=shuffle,
                                      num_workers=num_workers, pin_memory=pin_memory)
 
-    #Setting up the environment
+    # Setting up the environment
     metrics = {'train': train_metrics, 'val': val_metrics, 'cluster': cluster_metrics}
     seed = int(configuration.get('Kmeans parameters', 'seed'))
     k = int(configuration.get('Kmeans parameters', 'nb_clusters'))

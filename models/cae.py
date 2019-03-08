@@ -13,18 +13,18 @@ class CAE(nn.Module):
         self.down_bn1 = nn.BatchNorm2d(64)
         self.down_conv2 = nn.Conv2d(64, 128, 3)
         self.down_bn2 = nn.BatchNorm2d(128)
-        self.linear = nn.Linear(512, 1024)
-
+        self.linear1 = nn.Linear(512, 512)
+        self.linear2 = nn.Linear(512, 256)
         # decoder
-        self.up_conv1 = nn.ConvTranspose2d(1024, 512, 3)
-        self.up_bn1 = nn.BatchNorm2d(512)
-        self.up_conv2 = nn.ConvTranspose2d(512, 256, 3, stride=2)
-        self.up_bn2 = nn.BatchNorm2d(256)
-        self.up_conv3 = nn.ConvTranspose2d(256, 128, 3, stride=2)
-        self.up_bn3 = nn.BatchNorm2d(128)
-        self.up_conv4 = nn.ConvTranspose2d(128, 64, 4, stride=2)
-        self.up_bn4 = nn.BatchNorm2d(64)
-        self.mix_conv = nn.Conv2d(64, 3, 3, stride=1, padding=1)
+        self.up_conv1 = nn.ConvTranspose2d(256, 128, 3)
+        self.up_bn1 = nn.BatchNorm2d(128)
+        self.up_conv2 = nn.ConvTranspose2d(128, 64, 3, stride=2)
+        self.up_bn2 = nn.BatchNorm2d(64)
+        self.up_conv3 = nn.ConvTranspose2d(64, 32, 3, stride=2)
+        self.up_bn3 = nn.BatchNorm2d(32)
+        self.up_conv4 = nn.ConvTranspose2d(32, 16, 4, stride=2)
+        self.up_bn4 = nn.BatchNorm2d(16)
+        self.mix_conv = nn.Conv2d(16, 3, 3, stride=1, padding=1)
         self.sigmoid = nn.Sigmoid()
 
     def encoder(self, x):
@@ -40,7 +40,9 @@ class CAE(nn.Module):
 
         x = x.view(len(x), -1)
 
-        x = self.linear(x)
+        x = self.linear1(x)
+        x = self.relu(x)
+        x = self.linear2(x)
         x = torch.unsqueeze(x, -1)
         x = torch.unsqueeze(x, -1)
 

@@ -12,6 +12,7 @@ from tensorboardX import SummaryWriter
 
 from sklearn.cluster import MiniBatchKMeans, KMeans
 from sklearn.metrics import accuracy_score, f1_score
+from scipy.optimize import linear_sum_assignment
 import warnings  # To mute scikit-learn warnings about f1 score.
 
 warnings.filterwarnings("ignore")
@@ -19,6 +20,57 @@ warnings.filterwarnings("ignore")
 import pdb
 import time
 import numpy as np
+
+
+def match_labels(a, b):
+    """
+    Returns mappins from a to b that minimizes the distance between the input
+    label vectors. Inputs must be the same length. The unique values from a + b
+    are appended to a + b to ensure that both vectors contain all unique values.
+    For details see section 2 of Lange T et al. 2004.
+    E.g,
+    a = [1,1,2,3,3,4,4,4,2]
+    b = [2,2,3,1,1,4,4,4,3]
+    optimal: 1 -> 2; 2 -> 3; 3 -> 1; 4 -> 4
+    returns:
+        1 2
+        2 3
+        3 1
+        4 4
+    Inspired by http://things-about-r.tumblr.com/post/36087795708/matching-clustering-solutions-using-the-hungarian
+    """
+    if len(a) != len(b):
+        raise ValueError('length of a & b must be equal')
+
+    ids_a = np.unique(a)
+    ids_b = np.unique(b)
+
+    # in some cases, a and b do not have the same number of unique entries. This
+    # can happen if one of the two are predicted labels, and the data they were
+    # predicted from had some very small classes which constitute outliers, and
+    # are not predicted in the held out data. D should still contain an entry
+    # for this unlikely class, and our mapping should account for it. To
+    # facilitate this, we append all unique values from both a and b to each, so
+    # a and b are garunteed to have at least one entry from all unique values
+    n = max(len(ids_a), len(ids_b))  # may not be equal
+    D = np.zeros((n, n))  # distance matrix
+    a = np.hstack((np.hstack((a, ids_a)), ids_b))  # ensures no missing values
+    b = np.hstack((np.hstack((b, ids_a)), ids_b))  #
+
+    # constructs the distance matrix between a and b with appended values
+    for x in np.arange(n):
+        for y in np.arange(n):
+            idx_a = np.where(a == x)[0]
+            idx_b = np.where(b == y)[0]
+            n_int = len(np.intersect1d(idx_a, idx_b))
+            # distance = (# in cluster) - 2*sum(# in intersection)
+            D[x, y] = (len(idx_a) + len(idx_b) - 2 * n_int)
+
+    # permute labels w/ minimum weighted bipartite matching (hungarian method)
+    idx_D_x, idx_D_y = linear_sum_assignment(D)
+    mappings = np.hstack((np.atleast_2d(idx_D_x).T, np.atleast_2d(idx_D_y).T))
+
+    return mappings
 
 
 class Experiment(object):
@@ -89,6 +141,36 @@ class Experiment(object):
             shutil.copyfile(state_filepath, os.path.join(self.experiment_path, 'models', 'best.pth.tar'))
             shutil.copyfile(model_filepath, os.path.join(self.experiment_path, 'models', 'best_model.pth'))
 
+    @staticmethod
+    def assign_labels_to_clusters(k, cluster_pred, y_true):
+        """
+        Assign class label to each K-means cluster using labeled data.
+        The class label is based on the class of majority samples within a cluster or hungarian method
+        Unassigned clusters are labeled as -1.
+
+        """
+        print("Assigning labels to clusters ...", end=' ')
+
+        labelled_clusters = []
+
+        mapping = match_labels(cluster_pred, y_true)
+        for i in range(0, k):
+            idx = np.where(cluster_pred == i)[0]
+            if len(idx) != 0:
+                labels_freq = np.bincount(y_true[idx])
+                labelled_clusters.append(np.argmax(labels_freq))
+            else:
+                labelled_clusters.append(-1)
+        # hungarian method
+        yp_out = np.zeros(len(y_true), dtype=np.int32)
+        for c in np.arange(k):
+            idx_map = np.where(cluster_pred == c)
+            yp_out[idx_map] = mapping[c, 1]
+
+        labelled_clusters = np.asarray(labelled_clusters)
+        y_preds = labelled_clusters[cluster_pred]
+        return y_preds, yp_out
+
     def setup(self):
         # Setup random seed for the experiment if none provided use 0
         torch.manual_seed(self.parameters.get('random_seed', 0))
@@ -122,14 +204,15 @@ class Experiment(object):
             self.register_metrics(val_metrics, epoch + 1)
 
             # k-means stuff
-            kmeans = self.train_kmeans(train_dataloader, k, seed)
-            cluster_preds = self.predict_kmeans(kmeans, val_dataloader)
-            _, cluster_metrics = self.eval_kmeans(kmeans,
-                                                  cluster_preds,
-                                                  val_dataloader.dataset.targets,
-                                                  metrics.get('cluster'))
+            kmeans, cluster_preds = self.train_and_predict_kmeans(train_dataloader, val_dataloader, k, seed)
 
-            cluster_metrics['inertia'](kmeans)
+            y_preds_freq, y_preds_hung = self.assign_labels_to_clusters(k, cluster_preds, val_dataloader.dataset.targets)
+
+            cluster_metrics = self.eval_kmeans(kmeans,
+                                               y_preds_freq,
+                                               y_preds_hung,
+                                               val_dataloader.dataset.targets,
+                                               metrics.get('cluster'))
 
             #  Register cluster metrics to tensorboard
             self.register_metrics(cluster_metrics, epoch + 1)
@@ -213,38 +296,6 @@ class Experiment(object):
         logging.info("- Val metrics : \n" + metrics_string)
         return metrics
 
-    def eval_kmeans(self, kmeans, cluster_pred, y_true, metrics):
-        """
-        Assign class label to each K-means cluster using labeled data.
-        The class label is based on the class of majority samples within a cluster.
-        Unassigned clusters are labeled as -1.
-        After assigning computes kmeans accuracy and f1 score.
-        """
-        print("Assigning labels to clusters ...", end=' ')
-
-        self.reset_metrics(metrics)
-
-        start_time = time.time()
-
-        labelled_clusters = []
-
-        for i in range(0, kmeans.n_clusters):
-            idx = np.where(cluster_pred == i)[0]
-            if len(idx) != 0:
-                labels_freq = np.bincount(y_true[idx])
-                labelled_clusters.append(np.argmax(labels_freq))
-            else:
-                labelled_clusters.append(-1)
-        labelled_clusters = np.asarray(labelled_clusters)
-        y_preds = labelled_clusters[cluster_pred]
-
-        self.compute_metrics(metrics, y_true.reshape(-1, 1), y_preds.reshape(-1, 1))
-        accuracy, f1 = self.compute_kmeans_metrics(y_true.reshape(-1, 1), y_preds.reshape(-1, 1))
-        print("Done in {:.2f} sec | Accuracy: {:.2f} - F1: {:.2f}".format(time.time() - start_time, accuracy * 100,
-                                                                          f1 * 100))
-
-        return labelled_clusters, metrics
-
     @staticmethod
     def compute_kmeans_metrics(y_true, y_pred):
         """
@@ -254,14 +305,15 @@ class Experiment(object):
         f1 = f1_score(y_true, y_pred, average="weighted")
         return accuracy, f1
 
-    def train_kmeans(self, train_dataloader, n_clusters, seed):
+    def train_and_predict_kmeans(self, train_dataloader, val_dataloader, n_clusters, seed):
         """
         Train K-means model.
         """
         print("Training k-means ...", end=' ')
 
         # kmeans = MiniBatchKMeans(init="k-means++", n_clusters=n_clusters, n_init=3, max_iter=100, random_state=seed)
-        kmeans = KMeans(init="k-means++", n_clusters=n_clusters, n_init=5, max_iter=1000, random_state=seed, n_jobs=-1)
+        kmeans = KMeans(init="k-means++", n_clusters=n_clusters, n_init=3, max_iter=1000, random_state=seed, n_jobs=-1)
+        # gmm = GaussianMixture(n_components=n_clusters, max_iter=100, n_init=1, covariance_type='diag', verbose=2)
         start_time = time.time()
         train_embeddings = []
 
@@ -279,15 +331,9 @@ class Experiment(object):
         print("Done in {:.2f} sec |".format(time.time() - start_time), end=' ')
         print("model inertia = {:.2f}".format(kmeans.inertia_))
 
-        return kmeans
-
-    def predict_kmeans(self, kmeans, val_dataloader):
-        """
-        Predict labels.
-        """
         print("Evaluating k-means model ...", end=' ')
 
-        y_preds = []
+        cluster_preds = []
 
         for i, (data_batch, _) in enumerate(val_dataloader):
             data_batch = data_batch.to(self.device)
@@ -296,8 +342,26 @@ class Experiment(object):
             val_embeddings = np.squeeze(val_embeddings, -1)
             val_embeddings = np.squeeze(val_embeddings, -1)
             batch_preds = kmeans.predict(val_embeddings)
-            y_preds.append(batch_preds)
+            cluster_preds.append(batch_preds)
 
-        y_preds = np.squeeze(np.stack(y_preds), 0)
+        cluster_preds = np.squeeze(np.stack(cluster_preds), 0)
 
-        return y_preds
+        return kmeans, cluster_preds
+
+    def eval_kmeans(self, kmeans, y_true, y_preds_freq, y_preds_hung, cluster_metrics):
+        self.reset_metrics(cluster_metrics)
+        cluster_metrics['inertia'](kmeans)
+        self.compute_metrics(cluster_metrics, y_true.reshape(-1, 1), y_preds_freq.reshape(-1, 1))
+
+        accuracy, f1 = self.compute_kmeans_metrics(y_true.reshape(-1, 1), y_preds_freq.reshape(-1, 1))
+        print("Matching using max frequency:")
+        print("Accuracy: {:.2f} - F1: {:.2f}".format(accuracy * 100,
+                                                     f1 * 100))
+        print(80 * "-")
+        print("Matching using hungarian method:")
+        accuracy, f1 = self.compute_kmeans_metrics(y_true.reshape(-1, 1), y_preds_hung.reshape(-1, 1))
+        print("Accuracy: {:.2f} - F1: {:.2f}".format(accuracy * 100,
+                                                     f1 * 100))
+        print(80 * "-")
+
+        return cluster_metrics

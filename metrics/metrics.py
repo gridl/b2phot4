@@ -3,6 +3,7 @@ import numpy as np
 from sklearn.cluster import MiniBatchKMeans
 from sklearn.metrics import accuracy_score, f1_score
 
+
 class Metric(object):
     """Base class for metric implementation"""
     def __init__(self, writer):
@@ -157,7 +158,7 @@ class ACC(Metric):
         return accuracy_score(self.y_true, self.y_pred)
 
     def write_to_tensorboard(self, epoch):
-        self.writer.add_scalar(self.__class__.__name__ + '/Accuracy_of_Cluster', self.get_accuracy_cluster(), epoch)
+        self.writer.add_scalar(self.__class__.__name__, self.get_accuracy_cluster(), epoch)
 
 
 class F1score(Metric):
@@ -181,7 +182,7 @@ class F1score(Metric):
         return f1_score(self.y_true, self.y_pred, average="weighted")
 
     def write_to_tensorboard(self, epoch):
-        self.writer.add_scalar(self.__class__.__name__ + 'F1_score_of_Cluster', self.get_f1(), epoch)
+        self.writer.add_scalar(self.__class__.__name__, self.get_f1(), epoch)
 
 
 class Inertia(Metric):
@@ -194,8 +195,8 @@ class Inertia(Metric):
     def __init__(self, writer):
         super(Inertia, self).__init__(writer)
 
-    def __call__(self, cluster):
-        self.inertia = cluster.inertia_
+    def __call__(self, kmeans):
+        self.inertia = kmeans.inertia_
 
     def write_to_tensorboard(self, epoch):
-        self.writer.add_scalar(self.__class__.__name__ + 'Inertia_of_Cluster', self.inertia, epoch)
+        self.writer.add_scalar(self.__class__.__name__, self.inertia, epoch)
