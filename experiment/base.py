@@ -209,9 +209,9 @@ class Experiment(object):
             y_preds_freq, y_preds_hung = self.assign_labels_to_clusters(k, cluster_preds, val_dataloader.dataset.targets)
 
             cluster_metrics = self.eval_kmeans(kmeans,
+                                               val_dataloader.dataset.targets,
                                                y_preds_freq,
                                                y_preds_hung,
-                                               val_dataloader.dataset.targets,
                                                metrics.get('cluster'))
 
             #  Register cluster metrics to tensorboard
@@ -351,6 +351,7 @@ class Experiment(object):
     def eval_kmeans(self, kmeans, y_true, y_preds_freq, y_preds_hung, cluster_metrics):
         self.reset_metrics(cluster_metrics)
         cluster_metrics['inertia'](kmeans)
+        pdb.set_trace()
         self.compute_metrics(cluster_metrics, y_true.reshape(-1, 1), y_preds_freq.reshape(-1, 1))
 
         accuracy, f1 = self.compute_kmeans_metrics(y_true.reshape(-1, 1), y_preds_freq.reshape(-1, 1))
