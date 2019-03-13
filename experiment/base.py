@@ -8,11 +8,14 @@ from utils.misc import set_logger
 
 import torch
 from torchvision.utils import make_grid
+import torch.nn.functional as F
 from tensorboardX import SummaryWriter
 
 from sklearn.cluster import MiniBatchKMeans, KMeans
+from sklearn.mixture import GaussianMixture
 from sklearn.metrics import accuracy_score, f1_score
 from scipy.optimize import linear_sum_assignment
+from sklearn.model_selection import  StratifiedShuffleSplit
 import warnings  # To mute scikit-learn warnings about f1 score.
 
 warnings.filterwarnings("ignore")
@@ -142,7 +145,7 @@ class Experiment(object):
             shutil.copyfile(model_filepath, os.path.join(self.experiment_path, 'models', 'best_model.pth'))
 
     @staticmethod
-    def assign_labels_to_clusters(k, cluster_pred, y_true):
+    def assign_labels_to_clusters(k, assignment_preds, eval_preds, assignment_ys):
         """
         Assign class label to each K-means cluster using labeled data.
         The class label is based on the class of majority samples within a cluster or hungarian method
@@ -153,23 +156,25 @@ class Experiment(object):
 
         labelled_clusters = []
 
-        mapping = match_labels(cluster_pred, y_true)
         for i in range(0, k):
-            idx = np.where(cluster_pred == i)[0]
+            idx = np.where(assignment_preds == i)[0]
             if len(idx) != 0:
-                labels_freq = np.bincount(y_true[idx])
+                labels_freq = np.bincount(assignment_ys[idx])
                 labelled_clusters.append(np.argmax(labels_freq))
             else:
                 labelled_clusters.append(-1)
-        # hungarian method
-        yp_out = np.zeros(len(y_true), dtype=np.int32)
-        for c in np.arange(k):
-            idx_map = np.where(cluster_pred == c)
-            yp_out[idx_map] = mapping[c, 1]
 
         labelled_clusters = np.asarray(labelled_clusters)
-        y_preds = labelled_clusters[cluster_pred]
-        return y_preds, yp_out
+        y_preds = labelled_clusters[eval_preds]
+
+        # hungarian method
+        # mapping = match_labels(assignment_preds, assignment_ys)
+        # yp_out = np.zeros(len(eval_preds), dtype=np.int32)
+        # for c in np.arange(k):
+        #    idx_map = np.where(eval_preds == c)
+        #    yp_out[idx_map] = mapping[c, 1]
+
+        return y_preds  # , yp_out
 
     def setup(self):
         # Setup random seed for the experiment if none provided use 0
@@ -206,12 +211,17 @@ class Experiment(object):
             # k-means stuff
             kmeans, cluster_preds = self.train_and_predict_kmeans(train_dataloader, val_dataloader, k, seed)
 
-            y_preds_freq, y_preds_hung = self.assign_labels_to_clusters(k, cluster_preds, val_dataloader.dataset.targets)
+            sss = StratifiedShuffleSplit(n_splits=1, test_size=0.5)
+            for train_idx, test_idx in sss.split(cluster_preds, val_dataloader.dataset.targets):
+                assignment_preds, eval_preds = cluster_preds[train_idx], cluster_preds[test_idx]
+                assignment_ys, eval_ys = val_dataloader.dataset.targets[train_idx], \
+                                         val_dataloader.dataset.targets[test_idx]
+
+            y_preds_freq = self.assign_labels_to_clusters(k, assignment_preds, eval_preds, assignment_ys)
 
             cluster_metrics = self.eval_kmeans(kmeans,
-                                               val_dataloader.dataset.targets,
+                                               eval_ys,
                                                y_preds_freq,
-                                               y_preds_hung,
                                                metrics.get('cluster'))
 
             #  Register cluster metrics to tensorboard
@@ -235,6 +245,7 @@ class Experiment(object):
 
                 # compute model output and loss
                 output_batch = self.model(train_batch)
+
                 loss = self.compute_loss(output_batch, train_batch)
 
                 # clear previous gradients, compute gradients of all variables wrt loss
@@ -279,10 +290,6 @@ class Experiment(object):
             output_batch = self.model(data_batch)
             loss = self.compute_loss(output_batch, data_batch)
 
-            # extract data from torch Variable, move to cpu, convert to numpy arrays
-            # output_batch = output_batch.data.cpu().numpy()
-            # labels_batch = labels_batch.data.cpu().numpy()
-
             # update the average loss
             metrics['loss'].update(loss.item())
 
@@ -312,8 +319,8 @@ class Experiment(object):
         print("Training k-means ...", end=' ')
 
         # kmeans = MiniBatchKMeans(init="k-means++", n_clusters=n_clusters, n_init=3, max_iter=100, random_state=seed)
-        kmeans = KMeans(init="k-means++", n_clusters=n_clusters, n_init=3, max_iter=1000, random_state=seed, n_jobs=-1)
-        # gmm = GaussianMixture(n_components=n_clusters, max_iter=100, n_init=1, covariance_type='diag', verbose=2)
+        kmeans = KMeans(init="k-means++", n_clusters=n_clusters, n_init=3, max_iter=1000, n_jobs=-1)
+        # gmm = GaussianMixture(n_components=n_clusters, max_iter=100, n_init=1, covariance_type='full', verbose=2)
         start_time = time.time()
         train_embeddings = []
 
@@ -348,21 +355,22 @@ class Experiment(object):
 
         return kmeans, cluster_preds
 
-    def eval_kmeans(self, kmeans, y_true, y_preds_freq, y_preds_hung, cluster_metrics):
+    def eval_kmeans(self, kmeans, y_true, y_preds_freq, cluster_metrics):
+
         self.reset_metrics(cluster_metrics)
         cluster_metrics['inertia'](kmeans)
-        pdb.set_trace()
+
         self.compute_metrics(cluster_metrics, y_true.reshape(-1, 1), y_preds_freq.reshape(-1, 1))
 
         accuracy, f1 = self.compute_kmeans_metrics(y_true.reshape(-1, 1), y_preds_freq.reshape(-1, 1))
         print("Matching using max frequency:")
         print("Accuracy: {:.2f} - F1: {:.2f}".format(accuracy * 100,
                                                      f1 * 100))
-        print(80 * "-")
-        print("Matching using hungarian method:")
-        accuracy, f1 = self.compute_kmeans_metrics(y_true.reshape(-1, 1), y_preds_hung.reshape(-1, 1))
-        print("Accuracy: {:.2f} - F1: {:.2f}".format(accuracy * 100,
-                                                     f1 * 100))
+        # print(80 * "-")
+        # print("Matching using hungarian method:")
+        # accuracy, f1 = self.compute_kmeans_metrics(y_true.reshape(-1, 1), y_preds_hung.reshape(-1, 1))
+        # print("Accuracy: {:.2f} - F1: {:.2f}".format(accuracy * 100,
+        #                                             f1 * 100))
         print(80 * "-")
 
         return cluster_metrics

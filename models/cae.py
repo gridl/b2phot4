@@ -19,7 +19,7 @@ class CAE(nn.Module):
 
         self.resnet = resnet18(pretrained=False)
         # decoder
-        self.up_conv1 = nn.ConvTranspose2d(512, 256, 3)
+        self.up_conv1 = nn.ConvTranspose2d(64, 256, 3)
         self.up_bn1 = nn.BatchNorm2d(256)
         self.up_conv2 = nn.ConvTranspose2d(256, 128, 3, stride=2)
         self.up_bn2 = nn.BatchNorm2d(128)
@@ -187,7 +187,7 @@ class ResNet(nn.Module):
         self.layer1 = self._make_layer(block, 64, layers[0])
         self.layer2 = self._make_layer(block, 128, layers[1], stride=2)
         self.layer3 = self._make_layer(block, 256, layers[2], stride=2)
-        self.layer4 = self._make_layer(block, 512, layers[3], stride=2)
+        self.layer4 = self._make_layer(block, 64, layers[3], stride=2)
         self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
         # self.fc = nn.Linear(512 * block.expansion, num_classes)
 
