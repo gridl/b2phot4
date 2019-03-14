@@ -38,7 +38,7 @@ class HoromaDataset(Dataset):
 
         filename_x = osp.join(data_dir, "{}_x.dat".format(split))
         filename_y = osp.join(data_dir, "{}_y.txt".format(split))
-
+        filename_regions = osp.join(data_dir, "{}_regions_id.txt").format(split)
         self.targets = None
         if osp.exists(filename_y) and not split.startswith("train"):
             pre_targets = np.loadtxt(filename_y, 'U2')
@@ -51,6 +51,8 @@ class HoromaDataset(Dataset):
             self.map_labels = np.unique(pre_targets)
             self.targets = np.asarray([np.where(self.map_labels == t)[0][0] for t in pre_targets])
 
+        if osp.exists(filename_regions):
+            self.regions = np.genfromtxt(filename_regions, dtype=np.int32)
         self.data = np.memmap(filename_x,
                               dtype=datatype,
                               mode="r",

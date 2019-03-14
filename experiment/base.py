@@ -15,7 +15,7 @@ from sklearn.cluster import MiniBatchKMeans, KMeans
 from sklearn.mixture import GaussianMixture
 from sklearn.metrics import accuracy_score, f1_score
 from scipy.optimize import linear_sum_assignment
-from sklearn.model_selection import  StratifiedShuffleSplit
+from sklearn.model_selection import  StratifiedShuffleSplit, GroupShuffleSplit
 import warnings  # To mute scikit-learn warnings about f1 score.
 
 warnings.filterwarnings("ignore")
@@ -211,12 +211,14 @@ class Experiment(object):
             # k-means stuff
             kmeans, cluster_preds = self.train_and_predict_kmeans(train_dataloader, val_dataloader, k, seed)
 
-            sss = StratifiedShuffleSplit(n_splits=1, test_size=0.5)
-            for train_idx, test_idx in sss.split(cluster_preds, val_dataloader.dataset.targets):
+            regions = val_dataloader.dataset.regions
+            ggg = GroupShuffleSplit(n_splits=1, test_size=0.5)
+
+            for train_idx, test_idx in ggg.split(cluster_preds, val_dataloader.dataset.targets, regions):
                 assignment_preds, eval_preds = cluster_preds[train_idx], cluster_preds[test_idx]
                 assignment_ys, eval_ys = val_dataloader.dataset.targets[train_idx], \
                                          val_dataloader.dataset.targets[test_idx]
-
+                assignment_regions, eval_regions = regions[train_idx], regions[test_idx]
             y_preds_freq = self.assign_labels_to_clusters(k, assignment_preds, eval_preds, assignment_ys)
 
             cluster_metrics = self.eval_kmeans(kmeans,
@@ -320,7 +322,7 @@ class Experiment(object):
 
         # kmeans = MiniBatchKMeans(init="k-means++", n_clusters=n_clusters, n_init=3, max_iter=100, random_state=seed)
         kmeans = KMeans(init="k-means++", n_clusters=n_clusters, n_init=3, max_iter=1000, n_jobs=-1)
-        # gmm = GaussianMixture(n_components=n_clusters, max_iter=100, n_init=1, covariance_type='full', verbose=2)
+        # gmm = GaussianMixture(n_components=n_clusters, max_iter=100, n_init=1, covariance_type='diag', verbose=0)
         start_time = time.time()
         train_embeddings = []
 
