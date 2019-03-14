@@ -10,8 +10,7 @@ import torch
 from torchvision.utils import make_grid
 from tensorboardX import SummaryWriter
 
-from sklearn.cluster import MiniBatchKMeans, KMeans
-from sklearn.mixture import GaussianMixture
+from sklearn.cluster import  KMeans
 from sklearn.metrics import accuracy_score, f1_score
 from scipy.optimize import linear_sum_assignment
 from sklearn.model_selection import GroupShuffleSplit
@@ -233,6 +232,8 @@ class Experiment(object):
 
             #  Register cluster metrics to tensorboard
             self.register_metrics(cluster_metrics, epoch + 1)
+
+            # save best model
             val_acc = cluster_metrics['acc'].get_accuracy_cluster()
             is_best = val_acc >= best_val_acc
             if is_best:
@@ -328,9 +329,7 @@ class Experiment(object):
         """
         print("Training k-means ...", end=' ')
 
-        # kmeans = MiniBatchKMeans(init="k-means++", n_clusters=n_clusters, n_init=3, max_iter=100, random_state=seed)
         kmeans = KMeans(init="k-means++", n_clusters=n_clusters, n_init=3, max_iter=1000, n_jobs=-1)
-        # gmm = GaussianMixture(n_components=n_clusters, max_iter=100, n_init=1, covariance_type='diag', verbose=0)
         start_time = time.time()
         train_embeddings = []
 

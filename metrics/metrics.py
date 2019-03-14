@@ -1,6 +1,5 @@
 import os
 import numpy as np
-from sklearn.cluster import MiniBatchKMeans
 from sklearn.metrics import accuracy_score, f1_score
 
 
