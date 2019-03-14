@@ -8,7 +8,6 @@ from torchvision import transforms
 from utils import Configuration
 
 
-
 def instantiate(module, name):
     module = importlib.import_module(module)
     instance = getattr(module, name)
@@ -83,8 +82,6 @@ def train(config_file):
     train_dataset = train_dataset(split=train_split, skip=train_skip, flattened=False, transform=transform)
     valid_dataset = valid_dataset(split=val_split, skip=val_skip, flattened=False, transform=transform)
 
-    # train_dataset, valid_dataset = torch.utils.data.random_split(dataset,
-    #                               [int(0.7 * len(dataset)), int(0.3 * len(dataset))])
     train_dataloader = DataLoader(train_dataset, batch_size=train_batch_size, shuffle=train_shuffle,
                                   num_workers=train_num_workers, pin_memory=pin_memory)
     val_dataloader = DataLoader(valid_dataset, batch_size=val_batch_size, shuffle=False,
