@@ -3,19 +3,18 @@ import os
 import shutil
 import logging
 from tqdm import tqdm
-
+from joblib import dump, load
 from utils.misc import set_logger
 
 import torch
 from torchvision.utils import make_grid
-import torch.nn.functional as F
 from tensorboardX import SummaryWriter
 
 from sklearn.cluster import MiniBatchKMeans, KMeans
 from sklearn.mixture import GaussianMixture
 from sklearn.metrics import accuracy_score, f1_score
 from scipy.optimize import linear_sum_assignment
-from sklearn.model_selection import  StratifiedShuffleSplit, GroupShuffleSplit
+from sklearn.model_selection import GroupShuffleSplit
 import warnings  # To mute scikit-learn warnings about f1 score.
 
 warnings.filterwarnings("ignore")
@@ -130,7 +129,7 @@ class Experiment(object):
         for metric in metrics.values():
             metric.reset()
 
-    def save_checkpoint(self, epoch, is_best):
+    def save_checkpoint(self, epoch, is_best, kmeans):
         state = {
             'epoch': epoch,
             'model_state': self.model.state_dict(),
@@ -138,11 +137,15 @@ class Experiment(object):
         }
         state_filepath = os.path.join(self.experiment_path, 'models', 'last.pth.tar')
         model_filepath = os.path.join(self.experiment_path, 'models', 'last_model.pth')
+        kmeans_filepath = os.path.join(self.experiment_path, 'models', 'last_kmeans.joblib')
+
         torch.save(state, state_filepath)
         torch.save(self.model, model_filepath)
+        dump(kmeans, kmeans_filepath)
         if is_best:
             shutil.copyfile(state_filepath, os.path.join(self.experiment_path, 'models', 'best.pth.tar'))
             shutil.copyfile(model_filepath, os.path.join(self.experiment_path, 'models', 'best_model.pth'))
+            shutil.copyfile(kmeans_filepath, os.path.join(self.experiment_path, 'models', 'best_kmeans.joblib'))
 
     @staticmethod
     def assign_labels_to_clusters(k, assignment_preds, eval_preds, assignment_ys):
@@ -192,6 +195,8 @@ class Experiment(object):
         set_logger(os.path.join(self.experiment_path, 'log', 'experiment.log'))
 
     def train_and_validate(self, train_dataloader, val_dataloader, metrics, k, seed):
+        best_val_acc = 0
+
         for epoch in range(self.parameters.get('init_epoch', 0), int(self.parameters.get('num_epochs'))):
             # Run one epoch
             logging.info("Epoch {}/{}".format(epoch + 1, self.parameters.get('num_epochs')))
@@ -228,8 +233,11 @@ class Experiment(object):
 
             #  Register cluster metrics to tensorboard
             self.register_metrics(cluster_metrics, epoch + 1)
-            # val_acc = val_metrics['accuracy'].get_accuracy()
-            # is_best = val_acc >= best_val_acc
+            val_acc = cluster_metrics['acc'].get_accuracy_cluster()
+            is_best = val_acc >= best_val_acc
+            if is_best:
+                best_val_acc = val_acc
+            self.save_checkpoint(epoch, is_best, kmeans)
 
     def train_autoencoder(self, dataloader, metrics):
         # set model to training mode
