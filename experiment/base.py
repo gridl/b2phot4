@@ -10,7 +10,8 @@ import torch
 from torchvision.utils import make_grid
 from tensorboardX import SummaryWriter
 
-from sklearn.cluster import  KMeans
+from sklearn.cluster import KMeans
+from sklearn.mixture import GaussianMixture
 from sklearn.metrics import accuracy_score, f1_score
 from scipy.optimize import linear_sum_assignment
 from sklearn.model_selection import GroupShuffleSplit
@@ -128,7 +129,7 @@ class Experiment(object):
         for metric in metrics.values():
             metric.reset()
 
-    def save_checkpoint(self, epoch, is_best, kmeans):
+    def save_checkpoint(self, epoch, is_best, kmeans, mapping):
         state = {
             'epoch': epoch,
             'model_state': self.model.state_dict(),
@@ -137,14 +138,16 @@ class Experiment(object):
         state_filepath = os.path.join(self.experiment_path, 'models', 'last.pth.tar')
         model_filepath = os.path.join(self.experiment_path, 'models', 'last_model.pth')
         kmeans_filepath = os.path.join(self.experiment_path, 'models', 'last_kmeans.joblib')
-
+        mapping_filepath = os.path.join(self.experiment_path, 'models', 'last_mapping.npy')
         torch.save(state, state_filepath)
         torch.save(self.model, model_filepath)
         dump(kmeans, kmeans_filepath)
+        np.save(mapping_filepath, mapping)
         if is_best:
             shutil.copyfile(state_filepath, os.path.join(self.experiment_path, 'models', 'best.pth.tar'))
             shutil.copyfile(model_filepath, os.path.join(self.experiment_path, 'models', 'best_model.pth'))
             shutil.copyfile(kmeans_filepath, os.path.join(self.experiment_path, 'models', 'best_kmeans.joblib'))
+            shutil.copyfile(mapping_filepath, os.path.join(self.experiment_path, 'models', 'best_mapping.npy'))
 
     @staticmethod
     def assign_labels_to_clusters(k, assignment_preds, eval_preds, assignment_ys):
@@ -173,10 +176,10 @@ class Experiment(object):
         # mapping = match_labels(assignment_preds, assignment_ys)
         # yp_out = np.zeros(len(eval_preds), dtype=np.int32)
         # for c in np.arange(k):
-        #    idx_map = np.where(eval_preds == c)
-        #    yp_out[idx_map] = mapping[c, 1]
+        #     idx_map = np.where(eval_preds == c)
+        #     yp_out[idx_map] = mapping[c, 1]
 
-        return y_preds  # , yp_out
+        return labelled_clusters, y_preds  # , yp_out
 
     def setup(self):
         # Setup random seed for the experiment if none provided use 0
@@ -223,7 +226,11 @@ class Experiment(object):
                 assignment_ys, eval_ys = val_dataloader.dataset.targets[train_idx], \
                                          val_dataloader.dataset.targets[test_idx]
                 assignment_regions, eval_regions = regions[train_idx], regions[test_idx]
-            y_preds_freq = self.assign_labels_to_clusters(k, assignment_preds, eval_preds, assignment_ys)
+
+            labelled_clusters, y_preds_freq = self.assign_labels_to_clusters(k,
+                                                                             assignment_preds,
+                                                                             eval_preds,
+                                                                             assignment_ys)
 
             cluster_metrics = self.eval_kmeans(kmeans,
                                                eval_ys,
@@ -234,11 +241,11 @@ class Experiment(object):
             self.register_metrics(cluster_metrics, epoch + 1)
 
             # save best model
-            val_acc = cluster_metrics['acc'].get_accuracy_cluster()
+            val_acc = cluster_metrics['f1'].get_f1()
             is_best = val_acc >= best_val_acc
             if is_best:
                 best_val_acc = val_acc
-            self.save_checkpoint(epoch, is_best, kmeans)
+            self.save_checkpoint(epoch, is_best, kmeans, labelled_clusters)
 
     def train_autoencoder(self, dataloader, metrics):
         # set model to training mode
@@ -330,22 +337,21 @@ class Experiment(object):
         print("Training k-means ...", end=' ')
 
         kmeans = KMeans(init="k-means++", n_clusters=n_clusters, n_init=3, max_iter=1000, n_jobs=-1)
+        gmm = GaussianMixture(n_components=n_clusters, covariance_type='diag')
         start_time = time.time()
         train_embeddings = []
 
-        for i, (train_batch, label_batch) in enumerate(train_dataloader):
+        for i, (train_batch, _) in enumerate(train_dataloader):
             train_batch = train_batch.to(self.device)
             train_embeddings_batch = self.model.encoder(train_batch)
             train_embeddings_batch = train_embeddings_batch.detach().cpu().numpy()
-            train_embeddings_batch = np.squeeze(train_embeddings_batch, -1)
-            train_embeddings_batch = np.squeeze(train_embeddings_batch, -1)
             train_embeddings.append(train_embeddings_batch)
 
         train_embeddings = np.vstack(train_embeddings)
-        kmeans = kmeans.fit(train_embeddings)
+        gmm.fit(train_embeddings)
 
         print("Done in {:.2f} sec |".format(time.time() - start_time), end=' ')
-        print("model inertia = {:.2f}".format(kmeans.inertia_))
+        # print("model inertia = {:.2f}".format(kmeans.inertia_))
 
         print("Evaluating k-means model ...", end=' ')
 
@@ -355,19 +361,17 @@ class Experiment(object):
             data_batch = data_batch.to(self.device)
             val_embeddings = self.model.encoder(data_batch)
             val_embeddings = val_embeddings.detach().cpu().numpy()
-            val_embeddings = np.squeeze(val_embeddings, -1)
-            val_embeddings = np.squeeze(val_embeddings, -1)
-            batch_preds = kmeans.predict(val_embeddings)
+            batch_preds = gmm.predict(val_embeddings)
             cluster_preds.append(batch_preds)
 
         cluster_preds = np.squeeze(np.stack(cluster_preds), 0)
 
-        return kmeans, cluster_preds
+        return gmm, cluster_preds
 
     def eval_kmeans(self, kmeans, y_true, y_preds_freq, cluster_metrics):
 
         self.reset_metrics(cluster_metrics)
-        cluster_metrics['inertia'](kmeans)
+        # cluster_metrics['inertia'](kmeans)
 
         self.compute_metrics(cluster_metrics, y_true.reshape(-1, 1), y_preds_freq.reshape(-1, 1))
 
@@ -375,11 +379,6 @@ class Experiment(object):
         print("Matching using max frequency:")
         print("Accuracy: {:.2f} - F1: {:.2f}".format(accuracy * 100,
                                                      f1 * 100))
-        # print(80 * "-")
-        # print("Matching using hungarian method:")
-        # accuracy, f1 = self.compute_kmeans_metrics(y_true.reshape(-1, 1), y_preds_hung.reshape(-1, 1))
-        # print("Accuracy: {:.2f} - F1: {:.2f}".format(accuracy * 100,
-        #                                             f1 * 100))
         print(80 * "-")
 
         return cluster_metrics

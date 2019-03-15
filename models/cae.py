@@ -13,8 +13,7 @@ class CAE(nn.Module):
         self.down_bn1 = nn.BatchNorm2d(64)
         self.down_conv2 = nn.Conv2d(64, 128, 3)
         self.down_bn2 = nn.BatchNorm2d(128)
-        self.linear1 = nn.Linear(512, 512)
-        self.linear2 = nn.Linear(512, 256)
+        self.linear1 = nn.Linear(512, 64)
 
         self.resnet = resnet18(pretrained=False)
         # decoder
@@ -41,12 +40,7 @@ class CAE(nn.Module):
         x = self.relu(x)
 
         x = x.view(len(x), -1)
-
         x = self.linear1(x)
-        x = self.relu(x)
-        x = self.linear2(x)
-        x = torch.unsqueeze(x, -1)
-        x = torch.unsqueeze(x, -1)
 
         return x
 
@@ -73,7 +67,8 @@ class CAE(nn.Module):
 
     def forward(self, x):
 
-        x = self.resnet.forward(x)
+        # x = self.resnet.forward(x)
+        x = self.encoder(x)
         x = torch.unsqueeze(x, -1)
         x = torch.unsqueeze(x, -1)
         x = self.decoder(x)
