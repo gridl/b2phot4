@@ -259,6 +259,7 @@ class Experiment(object):
             labelled_clusters = self.assign_labels_to_clusters(k,
                                                                assignment_preds,
                                                                assignment_ys)
+
             y_preds_freq = labelled_clusters[eval_preds]
             cluster_metrics = self.eval_cluster(cluster, eval_ys, y_preds_freq, metrics)
 
@@ -346,12 +347,12 @@ class Experiment(object):
         logging.info("- Val metrics : \n" + metrics_string)
         return metrics
 
-    def train_predict_cluster(self, train_dataloader, val_dataloader, k):
+    def train_predict_cluster(self, train_dataloader, val_dataloader):
         if self.cluster_method == 'kmeans':
-            kmeans, cluster_preds = self.train_and_predict_kmeans(train_dataloader, val_dataloader, k)
+            kmeans, cluster_preds = self.train_and_predict_kmeans(train_dataloader, val_dataloader)
             return kmeans, cluster_preds
         elif self.cluster_method == 'gmm':
-            gmm, cluster_preds = self.train_and_predict_gmm(train_dataloader, val_dataloader, k)
+            gmm, cluster_preds = self.train_and_predict_gmm(train_dataloader, val_dataloader)
             return gmm, cluster_preds
 
     def eval_cluster(self, cluster, eval_labels, cluster_preds, metrics):
@@ -379,7 +380,7 @@ class Experiment(object):
 
         for i, (train_batch, _) in enumerate(train_dataloader):
             train_batch = train_batch.to(self.device)
-            train_embeddings_batch = self.model.resnet.forward(train_batch)
+            train_embeddings_batch = self.model.encoder(train_batch)
             train_embeddings_batch = train_embeddings_batch.detach().cpu().numpy()
             train_embeddings.append(train_embeddings_batch)
 
@@ -395,7 +396,7 @@ class Experiment(object):
 
         for i, (data_batch, _) in enumerate(val_dataloader):
             data_batch = data_batch.to(self.device)
-            val_embeddings = self.model.resnet.forward(data_batch)
+            val_embeddings = self.model.encoder(data_batch)
             val_embeddings = val_embeddings.detach().cpu().numpy()
             batch_preds = kmeans.predict(val_embeddings)
             cluster_preds.append(batch_preds)

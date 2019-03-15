@@ -67,8 +67,8 @@ class CAE(nn.Module):
 
     def forward(self, x):
 
-        x = self.resnet.forward(x)
-        # x = self.encoder(x)
+        # x = self.resnet.forward(x)
+        x = self.encoder(x)
         x = torch.unsqueeze(x, -1)
         x = torch.unsqueeze(x, -1)
         x = self.decoder(x)
