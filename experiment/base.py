@@ -159,7 +159,7 @@ class Experiment(object):
             shutil.copyfile(mapping_filepath, os.path.join(self.experiment_path, 'models', 'best_mapping.npy'))
 
     @staticmethod
-    def assign_labels_to_clusters(k, assignment_preds, eval_preds, assignment_ys):
+    def assign_labels_to_clusters(k, assignment_preds, assignment_ys):
         """
         Assign class label to each K-means cluster using labeled data.
         The class label is based on the class of majority samples within a cluster or hungarian method
@@ -179,7 +179,6 @@ class Experiment(object):
                 labelled_clusters.append(-1)
 
         labelled_clusters = np.asarray(labelled_clusters)
-        y_preds = labelled_clusters[eval_preds]
 
         # hungarian method
         # mapping = match_labels(assignment_preds, assignment_ys)
@@ -188,7 +187,7 @@ class Experiment(object):
         #     idx_map = np.where(eval_preds == c)
         #     yp_out[idx_map] = mapping[c, 1]
 
-        return labelled_clusters, y_preds  # , yp_out
+        return labelled_clusters
 
     @staticmethod
     def split_by_regions(ggg, cluster_preds, val_dataloader):
@@ -253,15 +252,14 @@ class Experiment(object):
             # cluster stuff
             cluster, cluster_preds = self.train_predict_cluster(train_dataloader, val_dataloader)
 
-            assignment, eval = self.split_by_regions(ggg, cluster_preds, val_dataloader)
-            assignment_preds, assignment_ys = assignment
-            eval_preds, eval_ys = eval
+            assignments, evals = self.split_by_regions(ggg, cluster_preds, val_dataloader)
+            assignment_preds, assignment_ys = assignments
+            eval_preds, eval_ys = evals
 
-            labelled_clusters, y_preds_freq = self.assign_labels_to_clusters(k,
-                                                                             assignment_preds,
-                                                                             eval_preds,
-                                                                             assignment_ys)
-
+            labelled_clusters = self.assign_labels_to_clusters(k,
+                                                               assignment_preds,
+                                                               assignment_ys)
+            y_preds_freq = labelled_clusters[eval_preds]
             cluster_metrics = self.eval_cluster(cluster, eval_ys, y_preds_freq, metrics)
 
             #  Register cluster metrics to tensorboard
@@ -468,6 +466,3 @@ class Experiment(object):
         print(80 * "-")
 
         return cluster_metrics
-
-
-
