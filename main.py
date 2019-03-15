@@ -41,10 +41,11 @@ def train(config_file):
     experiment_module = configuration.get('experiment', 'module')
     experiment_name = configuration.get('experiment', 'name')
     experiment = instantiate(experiment_module, experiment_name)
+    cluster_method = configuration.get('experiment', 'method')
+    k = int(configuration.get('Cluster parameters', 'nb_clusters'))
 
     # Initialize experiment
-
-    experiment = experiment(model, loss, optimizer, configuration)
+    experiment = experiment(model, cluster_method, k, loss, optimizer, configuration)
 
     # Instantiate metrics
     train_metrics = instantiate_metrics(configuration.get_section('train metrics'), experiment, 'train')
@@ -106,14 +107,11 @@ def train(config_file):
 
     # Setting up the environment
     metrics = {'train': train_metrics, 'val': val_metrics, 'cluster': cluster_metrics}
-    seed = int(configuration.get('Kmeans parameters', 'seed'))
-    k = int(configuration.get('Kmeans parameters', 'nb_clusters'))
 
     experiment.train_and_validate(train_dataloader,
                                   val_dataloader,
                                   metrics,
-                                  k,
-                                  seed)
+                                  k)
 
 
 if __name__ == '__main__':

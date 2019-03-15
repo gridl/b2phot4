@@ -78,15 +78,24 @@ def match_labels(a, b):
 class Experiment(object):
     """Base class for experiments"""
 
-    def __init__(self, model, loss, optimizer, configuration, restore_file=None, only_weights=False):
+    def __init__(self, model, cluster_method, n_clusters, loss, optimizer, configuration, restore_file=None,
+                 only_weights=False):
         self.configuration = configuration
         self.experiment_path = configuration.get_path()
         self.model = model()
         self.loss = loss()
-        self.optimizer = optimizer(self.model.parameters(), **configuration.get_section('optimizer parameters'))
-        self.device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
+        self.cluster_method = cluster_method
         self.parameters = configuration.get_section('setup')
         self.setup()
+
+        if cluster_method == 'kmeans':
+            self.cluster = KMeans(init="k-means++", n_clusters=n_clusters, n_init=3, max_iter=1000, n_jobs=-1)
+        elif cluster_method == 'gmm':
+            self.cluster = GaussianMixture(n_components=n_clusters, covariance_type='diag')
+
+        self.optimizer = optimizer(self.model.parameters(), **configuration.get_section('optimizer parameters'))
+        self.device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
+
         if restore_file is not None:
             self.load_checkpoint(restore_file, only_weights)
         self.train_writer = SummaryWriter(os.path.join(self.experiment_path, 'tensorboard', 'train'))
@@ -181,12 +190,37 @@ class Experiment(object):
 
         return labelled_clusters, y_preds  # , yp_out
 
-    def setup(self):
-        # Setup random seed for the experiment if none provided use 0
-        torch.manual_seed(self.parameters.get('random_seed', 0))
-        if torch.cuda.is_available():
-            torch.cuda.manual_seed(self.parameters.get('random_seed', 0))
+    @staticmethod
+    def split_by_regions(ggg, cluster_preds, val_dataloader):
 
+        for train_idx, test_idx in ggg.split(cluster_preds, val_dataloader.dataset.targets,
+                                             val_dataloader.dataset.regions):
+            assignment_preds, eval_preds = cluster_preds[train_idx], cluster_preds[test_idx]
+            assignment_ys, eval_ys = val_dataloader.dataset.targets[train_idx], \
+                                     val_dataloader.dataset.targets[test_idx]
+            assignment_regions, eval_regions = val_dataloader.dataset.regions[train_idx], \
+                                               val_dataloader.dataset.regions[test_idx]
+
+        return (assignment_preds, assignment_ys), (eval_preds, eval_ys)
+
+    @staticmethod
+    def compute_kmeans_metrics(y_true, y_pred):
+        """
+        Compute kmeans metrics.
+        """
+        accuracy = accuracy_score(y_true, y_pred)
+        f1 = f1_score(y_true, y_pred, average="weighted")
+        return accuracy, f1
+
+    def setup(self):
+        # Setup random seed for the experiment if none provided use 42
+        torch.manual_seed(self.parameters.get('random_seed', 42))
+        np.random.seed(self.parameters.get('random_seed', 42))
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed(self.parameters.get('random_seed', 42))
+            torch.cuda.manual_seed_all(self.parameters.get('random_seed', 42))
+        torch.backends.cudnn.benchmark = False
+        torch.backends.cudnn.deterministic = True
         # Create directories to store results
         for directory in ['log', 'results', 'models', 'tensorboard']:
             directory_path = os.path.join(self.experiment_path, directory)
@@ -196,8 +230,9 @@ class Experiment(object):
         # Set the logger
         set_logger(os.path.join(self.experiment_path, 'log', 'experiment.log'))
 
-    def train_and_validate(self, train_dataloader, val_dataloader, metrics, k, seed):
+    def train_and_validate(self, train_dataloader, val_dataloader, metrics, k):
         best_val_acc = 0
+        ggg = GroupShuffleSplit(n_splits=1, test_size=0.5)
 
         for epoch in range(self.parameters.get('init_epoch', 0), int(self.parameters.get('num_epochs'))):
             # Run one epoch
@@ -215,27 +250,19 @@ class Experiment(object):
             # Register validation metrics to tensorboard
             self.register_metrics(val_metrics, epoch + 1)
 
-            # k-means stuff
-            kmeans, cluster_preds = self.train_and_predict_kmeans(train_dataloader, val_dataloader, k, seed)
+            # cluster stuff
+            cluster, cluster_preds = self.train_predict_cluster(train_dataloader, val_dataloader)
 
-            regions = val_dataloader.dataset.regions
-            ggg = GroupShuffleSplit(n_splits=1, test_size=0.5)
-
-            for train_idx, test_idx in ggg.split(cluster_preds, val_dataloader.dataset.targets, regions):
-                assignment_preds, eval_preds = cluster_preds[train_idx], cluster_preds[test_idx]
-                assignment_ys, eval_ys = val_dataloader.dataset.targets[train_idx], \
-                                         val_dataloader.dataset.targets[test_idx]
-                assignment_regions, eval_regions = regions[train_idx], regions[test_idx]
+            assignment, eval = self.split_by_regions(ggg, cluster_preds, val_dataloader)
+            assignment_preds, assignment_ys = assignment
+            eval_preds, eval_ys = eval
 
             labelled_clusters, y_preds_freq = self.assign_labels_to_clusters(k,
                                                                              assignment_preds,
                                                                              eval_preds,
                                                                              assignment_ys)
 
-            cluster_metrics = self.eval_kmeans(kmeans,
-                                               eval_ys,
-                                               y_preds_freq,
-                                               metrics.get('cluster'))
+            cluster_metrics = self.eval_cluster(cluster, eval_ys, y_preds_freq, metrics)
 
             #  Register cluster metrics to tensorboard
             self.register_metrics(cluster_metrics, epoch + 1)
@@ -245,7 +272,7 @@ class Experiment(object):
             is_best = val_acc >= best_val_acc
             if is_best:
                 best_val_acc = val_acc
-            self.save_checkpoint(epoch, is_best, kmeans, labelled_clusters)
+            self.save_checkpoint(epoch, is_best, cluster, labelled_clusters)
 
     def train_autoencoder(self, dataloader, metrics):
         # set model to training mode
@@ -321,37 +348,48 @@ class Experiment(object):
         logging.info("- Val metrics : \n" + metrics_string)
         return metrics
 
-    @staticmethod
-    def compute_kmeans_metrics(y_true, y_pred):
-        """
-        Compute kmeans metrics.
-        """
-        accuracy = accuracy_score(y_true, y_pred)
-        f1 = f1_score(y_true, y_pred, average="weighted")
-        return accuracy, f1
+    def train_predict_cluster(self, train_dataloader, val_dataloader, k):
+        if self.cluster_method == 'kmeans':
+            kmeans, cluster_preds = self.train_and_predict_kmeans(train_dataloader, val_dataloader, k)
+            return kmeans, cluster_preds
+        elif self.cluster_method == 'gmm':
+            gmm, cluster_preds = self.train_and_predict_gmm(train_dataloader, val_dataloader, k)
+            return gmm, cluster_preds
 
-    def train_and_predict_kmeans(self, train_dataloader, val_dataloader, n_clusters, seed):
+    def eval_cluster(self, cluster, eval_labels, cluster_preds, metrics):
+        if self.cluster_method == 'kmeans':
+            cluster_metrics = self.eval_kmeans(cluster,
+                                               eval_labels,
+                                               cluster_preds,
+                                               metrics.get('cluster'))
+        elif self.cluster_method == 'gmm':
+            cluster_metrics = self.gmm(cluster,
+                                       eval_labels,
+                                       cluster_preds,
+                                       metrics.get('cluster'))
+        return cluster_metrics
+
+    def train_and_predict_kmeans(self, train_dataloader, val_dataloader):
         """
         Train K-means model.
         """
         print("Training k-means ...", end=' ')
 
-        kmeans = KMeans(init="k-means++", n_clusters=n_clusters, n_init=3, max_iter=1000, n_jobs=-1)
-        gmm = GaussianMixture(n_components=n_clusters, covariance_type='diag')
+        kmeans = self.cluster
         start_time = time.time()
         train_embeddings = []
 
         for i, (train_batch, _) in enumerate(train_dataloader):
             train_batch = train_batch.to(self.device)
-            train_embeddings_batch = self.model.encoder(train_batch)
+            train_embeddings_batch = self.model.resnet.forward(train_batch)
             train_embeddings_batch = train_embeddings_batch.detach().cpu().numpy()
             train_embeddings.append(train_embeddings_batch)
 
         train_embeddings = np.vstack(train_embeddings)
-        gmm.fit(train_embeddings)
+        kmeans.fit(train_embeddings)
 
         print("Done in {:.2f} sec |".format(time.time() - start_time), end=' ')
-        # print("model inertia = {:.2f}".format(kmeans.inertia_))
+        print("model inertia = {:.2f}".format(kmeans.inertia_))
 
         print("Evaluating k-means model ...", end=' ')
 
@@ -359,19 +397,19 @@ class Experiment(object):
 
         for i, (data_batch, _) in enumerate(val_dataloader):
             data_batch = data_batch.to(self.device)
-            val_embeddings = self.model.encoder(data_batch)
+            val_embeddings = self.model.resnet.forward(data_batch)
             val_embeddings = val_embeddings.detach().cpu().numpy()
-            batch_preds = gmm.predict(val_embeddings)
+            batch_preds = kmeans.predict(val_embeddings)
             cluster_preds.append(batch_preds)
 
         cluster_preds = np.squeeze(np.stack(cluster_preds), 0)
 
-        return gmm, cluster_preds
+        return kmeans, cluster_preds
 
     def eval_kmeans(self, kmeans, y_true, y_preds_freq, cluster_metrics):
 
         self.reset_metrics(cluster_metrics)
-        # cluster_metrics['inertia'](kmeans)
+        cluster_metrics['inertia'](kmeans)
 
         self.compute_metrics(cluster_metrics, y_true.reshape(-1, 1), y_preds_freq.reshape(-1, 1))
 
@@ -382,3 +420,54 @@ class Experiment(object):
         print(80 * "-")
 
         return cluster_metrics
+
+    def train_and_predict_gmm(self, train_dataloader, val_dataloader):
+        """
+        Train K-means model.
+        """
+        print("Training GMM ...", end=' ')
+
+        gmm = self.cluster
+        start_time = time.time()
+        train_embeddings = []
+
+        for i, (train_batch, _) in enumerate(train_dataloader):
+            train_batch = train_batch.to(self.device)
+            train_embeddings_batch = self.model.resnet.forward(train_batch)
+            train_embeddings_batch = train_embeddings_batch.detach().cpu().numpy()
+            train_embeddings.append(train_embeddings_batch)
+
+        train_embeddings = np.vstack(train_embeddings)
+        gmm.fit(train_embeddings)
+
+        print("Done in {:.2f} sec |".format(time.time() - start_time), end=' ')
+        print("Evaluating GMM model ...", end=' ')
+
+        cluster_preds = []
+
+        for i, (data_batch, _) in enumerate(val_dataloader):
+            data_batch = data_batch.to(self.device)
+            val_embeddings = self.model.resnet.forward(data_batch)
+            val_embeddings = val_embeddings.detach().cpu().numpy()
+            batch_preds = gmm.predict(val_embeddings)
+            cluster_preds.append(batch_preds)
+
+        cluster_preds = np.squeeze(np.stack(cluster_preds), 0)
+
+        return gmm, cluster_preds
+
+    def eval_gmm(self, gmm, y_true, y_preds_freq, cluster_metrics):
+
+        self.reset_metrics(cluster_metrics)
+        self.compute_metrics(cluster_metrics, y_true.reshape(-1, 1), y_preds_freq.reshape(-1, 1))
+
+        accuracy, f1 = self.compute_kmeans_metrics(y_true.reshape(-1, 1), y_preds_freq.reshape(-1, 1))
+        print("Matching using max frequency:")
+        print("Accuracy: {:.2f} - F1: {:.2f}".format(accuracy * 100,
+                                                     f1 * 100))
+        print(80 * "-")
+
+        return cluster_metrics
+
+
+
